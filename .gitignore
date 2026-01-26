@@ -1,0 +1,9 @@
+__pycache__
+imgs
+*.mp4
+settings.json
+
+*.spec
+build
+dist
+*.exe
