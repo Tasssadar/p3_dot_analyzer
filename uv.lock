@@ -148,6 +148,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dearpygui" },
     { name = "opencv-python" },
+    { name = "p3-ir-camera" },
 ]
 
 [package.dev-dependencies]
@@ -161,6 +162,7 @@ dev = [
 requires-dist = [
     { name = "dearpygui", specifier = ">=2.1.1" },
     { name = "opencv-python", specifier = ">=4.13.0.90" },
+    { name = "p3-ir-camera", git = "https://github.com/jvdillon/p3-ir-camera.git" },
 ]
 
 [package.metadata.requires-dev]
@@ -168,6 +170,16 @@ dev = [
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pyinstaller", specifier = ">=6.18.0" },
     { name = "ruff", specifier = ">=0.14.13" },
+]
+
+[[package]]
+name = "p3-ir-camera"
+version = "0.1.0"
+source = { git = "https://github.com/jvdillon/p3-ir-camera.git#b657bfdb44f8284ef52b44950b030acfff3baaec" }
+dependencies = [
+    { name = "numpy" },
+    { name = "opencv-python" },
+    { name = "pyusb" },
 ]
 
 [[package]]
@@ -236,6 +248,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/31/8f/8052ff65067697ee80fde45b9731842e160751c41ac5690ba232c22030e8/pyinstaller_hooks_contrib-2026.0.tar.gz", hash = "sha256:0120893de491a000845470ca9c0b39284731ac6bace26f6849dea9627aaed48e", size = 170311, upload-time = "2026-01-20T00:15:23.922Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/b1/9da6ec3e88696018ee7bb9dc4a7310c2cfaebf32923a19598cd342767c10/pyinstaller_hooks_contrib-2026.0-py3-none-any.whl", hash = "sha256:0590db8edeba3e6c30c8474937021f5cd39c0602b4d10f74a064c73911efaca5", size = 452318, upload-time = "2026-01-20T00:15:21.88Z" },
+]
+
+[[package]]
+name = "pyusb"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/6b/ce3727395e52b7b76dfcf0c665e37d223b680b9becc60710d4bc08b7b7cb/pyusb-1.3.1.tar.gz", hash = "sha256:3af070b607467c1c164f49d5b0caabe8ac78dbed9298d703a8dbf9df4052d17e", size = 77281, upload-time = "2025-01-08T23:45:01.866Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/b8/27e6312e86408a44fe16bd28ee12dd98608b39f7e7e57884a24e8f29b573/pyusb-1.3.1-py3-none-any.whl", hash = "sha256:bf9b754557af4717fe80c2b07cc2b923a9151f5c08d17bdb5345dac09d6a0430", size = 58465, upload-time = "2025-01-08T23:45:00.029Z" },
 ]
 
 [[package]]

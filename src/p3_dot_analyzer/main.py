@@ -6,7 +6,6 @@ import dearpygui.dearpygui as dpg  # type: ignore
 import os
 
 from .analysis import run_analysis, run_batch_analysis
-from .image_repository import ImageRepository
 from .models import AppState
 from .named_areas import (
     redraw_area_overlays,
@@ -22,31 +21,29 @@ from .settings_io import (
 from .ui_helpers import (
     screen_to_image_coords,
     sample_color_at,
-    show_image_at_current_index,
     update_color_display,
-    update_slider_range,
     update_status,
+    render_frame,
 )
+from .camera import (
+    RENDER_HEIGHT,
+    RENDER_WIDTH,
+    Camera,
+    CamEvVersion,
+    CamEvConnectFailed,
+)
+import logging
+
+
+def on_image_loaded_callback(state: AppState) -> None:
+    """Called after image loads - redraws areas and runs analysis if enabled."""
+    redraw_area_overlays(state)
+    if state.analysis_mode_enabled:
+        run_analysis(state)
 
 
 def build_ui(app_state: AppState) -> None:
     """Create Dear PyGui windows and widgets."""
-
-    def on_image_loaded_callback(state: AppState) -> None:
-        """Called after image loads - redraws areas and runs analysis if enabled."""
-        redraw_area_overlays(state)
-        if state.analysis_mode_enabled:
-            run_analysis(state)
-
-    def on_slider_change(sender: int, app_data: int, user_data: AppState) -> None:
-        user_data.repo.set_index(int(app_data))
-        show_image_at_current_index(user_data, on_image_loaded=on_image_loaded_callback)
-        schedule_settings_save(user_data)
-
-    def on_reload_clicked(sender: int, app_data: None, user_data: AppState) -> None:
-        user_data.repo.rescan()
-        update_slider_range(user_data)
-        show_image_at_current_index(user_data, on_image_loaded=on_image_loaded_callback)
 
     def on_mode_button_clicked(
         sender: int, app_data: None, user_data: AppState
@@ -242,10 +239,6 @@ def build_ui(app_state: AppState) -> None:
             update_status(app_state, "Please create at least one named area first")
             return
 
-        if app_state.repo.count() == 0:
-            update_status(app_state, "No images found")
-            return
-
         # Disable button during analysis
         dpg.configure_item(app_state.batch_analyze_button_tag, enabled=False)
         dpg.configure_item(app_state.batch_analyze_button_tag, label="Analyzing...")
@@ -359,27 +352,8 @@ def build_ui(app_state: AppState) -> None:
 
             # Right side: controls
             with dpg.group():
-                dpg.add_button(
-                    label="Reload images",
-                    callback=on_reload_clicked,
-                    user_data=app_state,
-                )
                 dpg.add_separator()
-                dpg.add_text("Image index:")
-                dpg.add_slider_int(
-                    label="",
-                    min_value=0,
-                    width=550,
-                    max_value=max(0, app_state.repo.count() - 1),
-                    default_value=app_state.repo.get_current_index(),
-                    callback=on_slider_change,
-                    tag=app_state.slider_tag,
-                    user_data=app_state,
-                )
                 dpg.add_text("", tag=app_state.timestamp_text_tag)
-                dpg.add_spacer(height=5)
-                dpg.add_text("Filename:")
-                dpg.add_text("", tag=app_state.filename_text_tag)
 
                 # Color picker display
                 dpg.add_separator()
@@ -492,24 +466,18 @@ def build_ui(app_state: AppState) -> None:
             button=dpg.mvMouseButton_Left, callback=on_mouse_release
         )
 
-    # Initialize slider state and first image
-    update_slider_range(app_state)
-    show_image_at_current_index(app_state, on_image_loaded=on_image_loaded_callback)
-
 
 def run() -> None:
     """Application entry point that sets up and runs the Dear PyGui app."""
     base_dir = Path(os.getcwd())
-    imgs_dir = base_dir / "imgs"
     settings_path = get_settings_path(base_dir)
 
-    repo = ImageRepository(imgs_dir)
+    logging.basicConfig(level=logging.DEBUG)
 
     dpg.create_context()
 
     texture_tag = "image_texture"
     app_state = AppState(
-        repo=repo,
         texture_tag=texture_tag,
         image_drawlist_tag="image_drawlist",
         image_draw_tag="image_draw",
@@ -519,36 +487,51 @@ def run() -> None:
         settings_path=settings_path,
     )
 
+    camera = Camera()
+
     settings = load_settings(settings_path)
     if settings is not None:
         apply_settings_to_state(app_state, settings)
 
     with dpg.texture_registry():
-        path = repo.get_current_path()
-        if path is None:
-            width = 256
-            height = 256
-            pixel_data = [0] * width * height * 4
-        else:
-            width, height, _channels, pixel_data = dpg.load_image(str(path))
-
-        dpg.add_dynamic_texture(width, height, pixel_data, tag=texture_tag)
+        dpg.add_dynamic_texture(
+            RENDER_WIDTH,
+            RENDER_HEIGHT,
+            [0] * RENDER_WIDTH * RENDER_HEIGHT * 4,
+            tag=texture_tag,
+        )
 
     build_ui(app_state)
     update_color_display(app_state)
     update_areas_list(app_state)
 
-    if repo.get_current_path() is None:
-        update_status(app_state, "No images found")
-
     dpg.create_viewport(title="P3 Camera Tecky - Image Viewer", width=1400, height=900)
+    dpg.set_viewport_vsync(True)
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.set_primary_window("main_window", True)
 
+    camera.start()
+
     try:
-        dpg.start_dearpygui()
+        while dpg.is_dearpygui_running():
+            ev = camera.get_event()
+            match ev:
+                case CamEvVersion():
+                    update_status(
+                        app_state, f"Camera connected: {ev.name} {ev.version}"
+                    )
+                case CamEvConnectFailed():
+                    update_status(app_state, f"Connect failed: {ev.message}")
+
+            frame = camera.take_frame()
+            if frame is not None:
+                app_state.current_frame = frame
+                render_frame(app_state, on_image_loaded=on_image_loaded_callback)
+
+            dpg.render_dearpygui_frame()
     finally:
+        camera.stop()
         dpg.destroy_context()
 
 

@@ -245,6 +245,7 @@ def run_analysis(app_state: AppState) -> None:
     Args:
         app_state: The application state.
     """
+    return
     # Import here to avoid circular imports
     from .named_areas import update_areas_list
 
@@ -261,7 +262,7 @@ def run_analysis(app_state: AppState) -> None:
         update_areas_list(app_state)
         return
 
-    if app_state.current_image_data is None:
+    if app_state.current_frame is None:
         update_areas_list(app_state)
         return
 

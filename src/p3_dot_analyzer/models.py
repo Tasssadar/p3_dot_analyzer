@@ -6,8 +6,7 @@ from threading import Timer
 from typing import TypedDict
 
 import numpy as np
-
-from .image_repository import ImageRepository
+from .camera import CamFrame
 
 IMAGES_PER_SECOND = 25
 
@@ -52,7 +51,6 @@ class BatchAnalysisResult:
 
 @dataclass(slots=True)
 class AppState:
-    repo: ImageRepository
     texture_tag: str
     image_drawlist_tag: str
     image_draw_tag: str
@@ -60,11 +58,9 @@ class AppState:
     filename_text_tag: str
     status_text_tag: str
     timestamp_text_tag: str = "timestamp_text"
+    current_frame: CamFrame | None = None
     # Color picker state
     selected_color: tuple[int, int, int] | None = (163, 163, 163)
-    current_image_data: np.ndarray | None = None
-    current_image_width: int = 0
-    current_image_height: int = 0
     color_swatch_tag: str = "color_swatch"
     color_text_tag: str = "color_text"
     # Named areas state
