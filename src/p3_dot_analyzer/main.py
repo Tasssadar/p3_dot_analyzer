@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 
 import dearpygui.dearpygui as dpg  # type: ignore
 import os
@@ -264,6 +265,146 @@ def build_ui(app_state: AppState) -> None:
         else:
             update_status(app_state, "Batch analysis failed")
 
+    def get_recordings_dir() -> Path:
+        if app_state.recordings_dir is None:
+            app_state.recordings_dir = Path(os.getcwd()) / "recordings"
+        return app_state.recordings_dir
+
+    def list_recordings() -> list[Path]:
+        recordings_dir = get_recordings_dir()
+        if not recordings_dir.exists():
+            return []
+        return sorted(recordings_dir.glob("*.mp4"), key=lambda p: p.name.lower())
+
+    def refresh_recordings_list() -> None:
+        if not dpg.does_item_exist(app_state.recordings_list_tag):
+            return
+        dpg.delete_item(app_state.recordings_list_tag, children_only=True)
+        recordings = list_recordings()
+        if not recordings:
+            dpg.add_text("No recordings found", parent=app_state.recordings_list_tag)
+            return
+        for rec_path in recordings:
+            is_selected = app_state.selected_recording_path == rec_path
+
+            def on_select(sender: int, app_data: bool, user_data: Path) -> None:
+                if not app_data:
+                    return
+                app_state.selected_recording_path = user_data
+                update_status(app_state, f"Selected recording: {user_data.name}")
+                # TODO: Hook up playback for selected recording.
+                refresh_recordings_list()
+
+            with dpg.group(horizontal=True, parent=app_state.recordings_list_tag):
+                dpg.add_selectable(
+                    label=rec_path.name,
+                    default_value=is_selected,
+                    callback=on_select,
+                    user_data=rec_path,
+                    width=210,
+                )
+
+                def on_rename_clicked(
+                    sender: int, app_data: None, user_data: Path
+                ) -> None:
+                    if (
+                        app_state.recording_active
+                        and app_state.current_recording_path == user_data
+                    ):
+                        update_status(app_state, "Cannot rename the active recording.")
+                        return
+                    show_rename_modal(user_data)
+
+                def on_delete_clicked(
+                    sender: int, app_data: None, user_data: Path
+                ) -> None:
+                    if (
+                        app_state.recording_active
+                        and app_state.current_recording_path == user_data
+                    ):
+                        update_status(app_state, "Cannot delete the active recording.")
+                        return
+                    try:
+                        if user_data.exists():
+                            user_data.unlink()
+                        if app_state.selected_recording_path == user_data:
+                            app_state.selected_recording_path = None
+                        update_status(app_state, f"Deleted recording: {user_data.name}")
+                    except OSError as exc:
+                        update_status(
+                            app_state,
+                            f"Failed to delete recording: {user_data.name} ({exc})",
+                        )
+                    refresh_recordings_list()
+
+                dpg.add_button(
+                    label="Rename",
+                    callback=on_rename_clicked,
+                    user_data=rec_path,
+                    width=60,
+                )
+                dpg.add_button(
+                    label="Delete",
+                    callback=on_delete_clicked,
+                    user_data=rec_path,
+                    width=55,
+                )
+
+    def show_rename_modal(target_path: Path) -> None:
+        if dpg.does_item_exist(app_state.rename_modal_tag):
+            dpg.delete_item(app_state.rename_modal_tag)
+
+        def on_confirm(sender: int, app_data: None) -> None:
+            new_name = dpg.get_value(app_state.rename_input_tag).strip()
+            if not new_name:
+                update_status(app_state, "Recording name cannot be empty.")
+                return
+            if any(sep in new_name for sep in ("/", "\\")):
+                update_status(
+                    app_state, "Recording name cannot contain path separators."
+                )
+                return
+            recordings_dir = get_recordings_dir()
+            new_path = recordings_dir / f"{new_name}{target_path.suffix}"
+            if new_path.exists():
+                update_status(app_state, "A recording with that name already exists.")
+                return
+            try:
+                target_path.rename(new_path)
+                if app_state.selected_recording_path == target_path:
+                    app_state.selected_recording_path = new_path
+                update_status(app_state, f"Renamed recording to: {new_path.name}")
+            except OSError as exc:
+                update_status(
+                    app_state,
+                    f"Failed to rename recording: {target_path.name} ({exc})",
+                )
+            dpg.delete_item(app_state.rename_modal_tag)
+            refresh_recordings_list()
+
+        def on_cancel(sender: int, app_data: None) -> None:
+            dpg.delete_item(app_state.rename_modal_tag)
+
+        with dpg.window(
+            label="Rename Recording",
+            tag=app_state.rename_modal_tag,
+            modal=True,
+            no_close=True,
+            pos=(400, 300),
+            width=320,
+            height=140,
+        ):
+            dpg.add_text(f"Current: {target_path.name}")
+            dpg.add_input_text(
+                label="New name",
+                tag=app_state.rename_input_tag,
+                default_value=target_path.stem,
+                width=220,
+            )
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Rename", callback=on_confirm)
+                dpg.add_button(label="Cancel", callback=on_cancel)
+
     def show_batch_results_chart(state: AppState) -> None:
         """Show or update the batch results chart window."""
         if state.batch_result is None:
@@ -333,125 +474,291 @@ def build_ui(app_state: AppState) -> None:
                 )
         return theme  # type: ignore
 
-    with dpg.window(label="Image Viewer", tag="main_window", width=900, height=700):
+    with dpg.window(label="Image Viewer", tag="main_window", width=1300, height=760):
         dpg.add_text("", tag=app_state.status_text_tag)
 
         with dpg.group(horizontal=True):
-            # Left side: image area
+            # Left side: recordings list (always visible)
             with dpg.group():
-                dpg.add_text("Image")
-                with dpg.drawlist(
-                    width=800, height=600, tag=app_state.image_drawlist_tag
+                dpg.add_text("Recordings")
+                with dpg.child_window(
+                    tag=app_state.recordings_list_tag,
+                    width=360,
+                    height=640,
+                    border=True,
                 ):
-                    dpg.draw_image(
-                        app_state.texture_tag,
-                        pmin=(0, 0),
-                        pmax=(1, 1),  # will be updated when an image loads
-                        tag=app_state.image_draw_tag,
-                    )
+                    dpg.add_text("No recordings found")
 
-            # Right side: controls
+            # Right side: tabs
             with dpg.group():
                 dpg.add_separator()
                 dpg.add_text("", tag=app_state.timestamp_text_tag)
 
-                # Color picker display
-                dpg.add_separator()
-                dpg.add_text("Selected Color:")
-                with dpg.drawlist(width=60, height=30, tag="color_swatch_drawlist"):
-                    dpg.draw_rectangle(
-                        pmin=(0, 0),
-                        pmax=(60, 30),
-                        fill=(128, 128, 128, 255),
-                        color=(200, 200, 200, 255),
-                        tag=app_state.color_swatch_tag,
-                    )
-                dpg.add_text("No color selected", tag=app_state.color_text_tag)
+                def on_tab_change(sender: int, app_data: str) -> None:
+                    app_state.active_tab = app_data
 
-                # Named areas controls
-                dpg.add_separator()
-                dpg.add_text("Named Areas:")
-                dpg.add_button(
-                    label="Create Area",
-                    callback=on_mode_button_clicked,
-                    user_data=app_state,
-                    tag=app_state.mode_button_tag,
-                )
+                with dpg.tab_bar(callback=on_tab_change):
+                    with dpg.tab(label="Recording", tag="recording_tab"):
+                        with dpg.group(horizontal=True):
+                            with dpg.group():
+                                dpg.add_text("Camera")
+                                with dpg.drawlist(
+                                    width=800,
+                                    height=600,
+                                    tag=app_state.recording_drawlist_tag,
+                                ):
+                                    dpg.draw_image(
+                                        app_state.texture_tag,
+                                        pmin=(0, 0),
+                                        pmax=(1, 1),  # updated on render
+                                        tag=app_state.recording_draw_tag,
+                                    )
+                            with dpg.group():
+                                dpg.add_text("Recording Controls")
+                                dpg.add_separator()
 
-                dpg.add_separator()
-                dpg.add_text("Named Areas:")
-                dpg.add_text("(Click 'Create Area' then drag on image)")
-                dpg.add_separator()
+                                start_button_tag = "recording_start_button"
+                                pause_button_tag = "recording_pause_button"
+                                stop_button_tag = "recording_stop_button"
 
-                # Areas list container
-                with dpg.child_window(
-                    tag=app_state.areas_list_tag, height=250, border=True
-                ):
-                    dpg.add_text("No areas defined")
+                                def update_recording_buttons() -> None:
+                                    start_enabled = (
+                                        not app_state.recording_active
+                                        or app_state.recording_paused
+                                    )
+                                    pause_enabled = app_state.recording_active
+                                    stop_enabled = app_state.recording_active
+                                    dpg.configure_item(
+                                        start_button_tag, enabled=start_enabled
+                                    )
+                                    dpg.configure_item(
+                                        pause_button_tag, enabled=pause_enabled
+                                    )
+                                    dpg.configure_item(
+                                        stop_button_tag, enabled=stop_enabled
+                                    )
 
-                dpg.add_separator()
-                dpg.add_text("Analysis:")
-                dpg.add_checkbox(
-                    label="Enable Analysis Mode",
-                    callback=on_analysis_toggle,
-                    tag=app_state.analysis_checkbox_tag,
-                    default_value=app_state.analysis_mode_enabled,
-                )
-                dpg.add_input_int(
-                    label="Tolerance (1-100)",
-                    default_value=app_state.color_tolerance,
-                    min_value=1,
-                    max_value=100,
-                    min_clamped=True,
-                    max_clamped=True,
-                    callback=on_tolerance_change,
-                    tag=app_state.tolerance_input_tag,
-                    width=120,
-                )
-                dpg.add_input_int(
-                    label="Min Area (10-5000)",
-                    default_value=app_state.min_area,
-                    min_value=10,
-                    max_value=5000,
-                    min_clamped=True,
-                    max_clamped=True,
-                    callback=on_min_area_change,
-                    tag=app_state.min_area_input_tag,
-                    width=120,
-                )
-                dpg.add_input_float(
-                    label="Min Circularity (0-1)",
-                    default_value=app_state.min_circularity,
-                    min_value=0.0,
-                    max_value=1.0,
-                    min_clamped=True,
-                    max_clamped=True,
-                    callback=on_min_circularity_change,
-                    tag=app_state.min_circularity_input_tag,
-                    width=120,
-                    format="%.2f",
-                )
+                                def on_start_recording(
+                                    sender: int, app_data: None
+                                ) -> None:
+                                    if app_state.recording_active:
+                                        update_status(
+                                            app_state, "Recording already in progress."
+                                        )
+                                        return
+                                    recordings_dir = get_recordings_dir()
+                                    recordings_dir.mkdir(parents=True, exist_ok=True)
+                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    app_state.current_recording_path = (
+                                        recordings_dir / f"recording_{timestamp}.mp4"
+                                    )
+                                    app_state.recording_active = True
+                                    app_state.recording_paused = False
+                                    dpg.configure_item(pause_button_tag, label="Pause")
+                                    update_recording_buttons()
+                                    update_status(
+                                        app_state,
+                                        f"Recording started: {app_state.current_recording_path.name}",
+                                    )
+                                    # TODO: Start writing frames to MP4.
 
-                # Batch analysis controls
-                dpg.add_separator()
-                dpg.add_text("Batch Analysis:")
-                dpg.add_input_int(
-                    label="Sampling (1-100)",
-                    default_value=app_state.batch_sampling_rate,
-                    min_value=1,
-                    max_value=100,
-                    min_clamped=True,
-                    max_clamped=True,
-                    callback=on_sampling_rate_change,
-                    tag=app_state.batch_sampling_input_tag,
-                    width=100,
-                )
-                dpg.add_text("(e.g., 5 = every 5th image)", color=(150, 150, 150))
-                dpg.add_button(
-                    label="Analyze Whole Batch",
-                    callback=on_batch_analyze_clicked,
-                    tag=app_state.batch_analyze_button_tag,
-                )
+                                def on_pause_recording(
+                                    sender: int, app_data: None
+                                ) -> None:
+                                    if not app_state.recording_active:
+                                        update_status(
+                                            app_state, "No active recording to pause."
+                                        )
+                                        return
+                                    app_state.recording_paused = (
+                                        not app_state.recording_paused
+                                    )
+                                    dpg.configure_item(
+                                        pause_button_tag,
+                                        label="Resume"
+                                        if app_state.recording_paused
+                                        else "Pause",
+                                    )
+                                    update_recording_buttons()
+                                    update_status(
+                                        app_state,
+                                        "Recording paused."
+                                        if app_state.recording_paused
+                                        else "Recording resumed.",
+                                    )
+                                    # TODO: Pause/resume writing frames.
+
+                                def on_stop_recording(
+                                    sender: int, app_data: None
+                                ) -> None:
+                                    if not app_state.recording_active:
+                                        update_status(
+                                            app_state, "No active recording to stop."
+                                        )
+                                        return
+                                    app_state.recording_active = False
+                                    app_state.recording_paused = False
+                                    dpg.configure_item(pause_button_tag, label="Pause")
+                                    update_recording_buttons()
+                                    update_status(
+                                        app_state,
+                                        "Recording stopped.",
+                                    )
+                                    # TODO: Finalize and close MP4 writer.
+                                    app_state.current_recording_path = None
+                                    refresh_recordings_list()
+
+                                dpg.add_button(
+                                    label="Start",
+                                    callback=on_start_recording,
+                                    tag=start_button_tag,
+                                    width=200,
+                                    height=50,
+                                )
+                                dpg.add_button(
+                                    label="Pause",
+                                    tag=pause_button_tag,
+                                    callback=on_pause_recording,
+                                    width=200,
+                                    height=50,
+                                )
+                                dpg.add_button(
+                                    label="Stop",
+                                    callback=on_stop_recording,
+                                    tag=stop_button_tag,
+                                    width=200,
+                                    height=50,
+                                )
+                                update_recording_buttons()
+
+                    with dpg.tab(label="Analysis", tag="analysis_tab"):
+                        with dpg.group(horizontal=True):
+                            # Left side: image area
+                            with dpg.group():
+                                dpg.add_text("Image")
+                                with dpg.drawlist(
+                                    width=800,
+                                    height=600,
+                                    tag=app_state.image_drawlist_tag,
+                                ):
+                                    dpg.draw_image(
+                                        app_state.texture_tag,
+                                        pmin=(0, 0),
+                                        pmax=(1, 1),  # updated on render
+                                        tag=app_state.image_draw_tag,
+                                    )
+
+                            # Right side: controls
+                            with dpg.group():
+                                dpg.add_separator()
+
+                                # Color picker display
+                                dpg.add_separator()
+                                dpg.add_text("Selected Color:")
+                                with dpg.drawlist(
+                                    width=60, height=30, tag="color_swatch_drawlist"
+                                ):
+                                    dpg.draw_rectangle(
+                                        pmin=(0, 0),
+                                        pmax=(60, 30),
+                                        fill=(128, 128, 128, 255),
+                                        color=(200, 200, 200, 255),
+                                        tag=app_state.color_swatch_tag,
+                                    )
+                                dpg.add_text(
+                                    "No color selected", tag=app_state.color_text_tag
+                                )
+
+                                # Named areas controls
+                                dpg.add_separator()
+                                dpg.add_text("Named Areas:")
+                                dpg.add_button(
+                                    label="Create Area",
+                                    callback=on_mode_button_clicked,
+                                    user_data=app_state,
+                                    tag=app_state.mode_button_tag,
+                                )
+
+                                dpg.add_separator()
+                                dpg.add_text("Named Areas:")
+                                dpg.add_text("(Click 'Create Area' then drag on image)")
+                                dpg.add_separator()
+
+                                # Areas list container
+                                with dpg.child_window(
+                                    tag=app_state.areas_list_tag,
+                                    height=250,
+                                    border=True,
+                                ):
+                                    dpg.add_text("No areas defined")
+
+                                dpg.add_separator()
+                                dpg.add_text("Analysis:")
+                                dpg.add_checkbox(
+                                    label="Enable Analysis Mode",
+                                    callback=on_analysis_toggle,
+                                    tag=app_state.analysis_checkbox_tag,
+                                    default_value=app_state.analysis_mode_enabled,
+                                )
+                                dpg.add_input_int(
+                                    label="Tolerance (1-100)",
+                                    default_value=app_state.color_tolerance,
+                                    min_value=1,
+                                    max_value=100,
+                                    min_clamped=True,
+                                    max_clamped=True,
+                                    callback=on_tolerance_change,
+                                    tag=app_state.tolerance_input_tag,
+                                    width=120,
+                                )
+                                dpg.add_input_int(
+                                    label="Min Area (10-5000)",
+                                    default_value=app_state.min_area,
+                                    min_value=10,
+                                    max_value=5000,
+                                    min_clamped=True,
+                                    max_clamped=True,
+                                    callback=on_min_area_change,
+                                    tag=app_state.min_area_input_tag,
+                                    width=120,
+                                )
+                                dpg.add_input_float(
+                                    label="Min Circularity (0-1)",
+                                    default_value=app_state.min_circularity,
+                                    min_value=0.0,
+                                    max_value=1.0,
+                                    min_clamped=True,
+                                    max_clamped=True,
+                                    callback=on_min_circularity_change,
+                                    tag=app_state.min_circularity_input_tag,
+                                    width=120,
+                                    format="%.2f",
+                                )
+
+                                # Batch analysis controls
+                                dpg.add_separator()
+                                dpg.add_text("Batch Analysis:")
+                                dpg.add_input_int(
+                                    label="Sampling (1-100)",
+                                    default_value=app_state.batch_sampling_rate,
+                                    min_value=1,
+                                    max_value=100,
+                                    min_clamped=True,
+                                    max_clamped=True,
+                                    callback=on_sampling_rate_change,
+                                    tag=app_state.batch_sampling_input_tag,
+                                    width=100,
+                                )
+                                dpg.add_text(
+                                    "(e.g., 5 = every 5th image)", color=(150, 150, 150)
+                                )
+                                dpg.add_button(
+                                    label="Analyze Whole Batch",
+                                    callback=on_batch_analyze_clicked,
+                                    tag=app_state.batch_analyze_button_tag,
+                                )
+
+    refresh_recordings_list()
 
     # Global mouse handlers for color picking and area creation
     with dpg.handler_registry():
@@ -486,6 +793,7 @@ def run() -> None:
         status_text_tag="status_text",
         settings_path=settings_path,
     )
+    app_state.recordings_dir = base_dir / "recordings"
 
     camera = Camera()
 
@@ -505,7 +813,7 @@ def run() -> None:
     update_color_display(app_state)
     update_areas_list(app_state)
 
-    dpg.create_viewport(title="P3 Camera Tecky - Image Viewer", width=1400, height=900)
+    dpg.create_viewport(title="P3 Camera Tecky - Image Viewer", width=1700, height=950)
     dpg.set_viewport_vsync(True)
     dpg.setup_dearpygui()
     dpg.show_viewport()

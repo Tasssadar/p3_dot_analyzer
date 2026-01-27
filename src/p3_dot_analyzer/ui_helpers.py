@@ -110,11 +110,18 @@ def render_frame(
     dpg.set_value(app_state.texture_tag, app_state.current_frame.img)
 
     # Draw image from (0, 0) to (width, height) in the drawlist's space
-    dpg.configure_item(
-        app_state.image_draw_tag,
-        pmin=(0, 0),
-        pmax=(app_state.current_frame.width, app_state.current_frame.height),
-    )
+    if dpg.does_item_exist(app_state.image_draw_tag):
+        dpg.configure_item(
+            app_state.image_draw_tag,
+            pmin=(0, 0),
+            pmax=(app_state.current_frame.width, app_state.current_frame.height),
+        )
+    if dpg.does_item_exist(app_state.recording_draw_tag):
+        dpg.configure_item(
+            app_state.recording_draw_tag,
+            pmin=(0, 0),
+            pmax=(app_state.current_frame.width, app_state.current_frame.height),
+        )
 
     # Call optional callback (e.g., to redraw area overlays)
     if on_image_loaded is not None:

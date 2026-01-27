@@ -4,8 +4,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Timer
 from typing import TypedDict
-
-import numpy as np
 from .camera import CamFrame
 
 IMAGES_PER_SECOND = 25
@@ -89,6 +87,18 @@ class AppState:
     batch_analyze_button_tag: str = "batch_analyze_button"
     batch_chart_window_tag: str = "batch_chart_window"
     batch_plot_tag: str = "batch_plot"
+    # Recording / playback UI state
+    recording_active: bool = False
+    recording_paused: bool = False
+    current_recording_path: Path | None = None
+    selected_recording_path: Path | None = None
+    recordings_dir: Path | None = None
+    recordings_list_tag: str = "recordings_list"
+    recording_drawlist_tag: str = "recording_drawlist"
+    recording_draw_tag: str = "recording_draw"
+    rename_modal_tag: str = "rename_recording_modal"
+    rename_input_tag: str = "rename_recording_input"
+    active_tab: str = "analysis_tab"
     # Settings persistence
     settings_path: Path | None = None
     settings_save_timer: Timer | None = None
