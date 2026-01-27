@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Timer
 from typing import TypedDict
-from .camera import CamFrame
+from p3_viewer import ColormapID  # type: ignore
+
+from .camera import CamFrame, RecordingReader
 
 IMAGES_PER_SECOND = 25
 
@@ -37,6 +39,9 @@ class SettingsData(TypedDict, total=False):
     batch_sampling_rate: int
     named_areas: list[NamedAreaData]
     current_index: int
+    render_temp_min: float
+    render_temp_max: float
+    render_colormap: str
 
 
 @dataclass(slots=True)
@@ -50,6 +55,7 @@ class BatchAnalysisResult:
 @dataclass(slots=True)
 class AppState:
     texture_tag: str
+    recording_texture_tag: str
     image_drawlist_tag: str
     image_draw_tag: str
     slider_tag: str
@@ -57,6 +63,12 @@ class AppState:
     status_text_tag: str
     timestamp_text_tag: str = "timestamp_text"
     current_frame: CamFrame | None = None
+    render_temp_min: float = 0.0
+    render_temp_max: float = 35.0
+    render_colormap: ColormapID = ColormapID.WHITE_HOT
+    render_temp_min_input_tag: str = "render_temp_min_input"
+    render_temp_max_input_tag: str = "render_temp_max_input"
+    render_colormap_combo_tag: str = "render_colormap_combo"
     # Color picker state
     selected_color: tuple[int, int, int] | None = (163, 163, 163)
     color_swatch_tag: str = "color_swatch"
@@ -92,6 +104,11 @@ class AppState:
     recording_paused: bool = False
     current_recording_path: Path | None = None
     selected_recording_path: Path | None = None
+    recording_reader: RecordingReader | None = None
+    recording_frame_index: int = 0
+    recording_frame_count: int = 0
+    recording_frame_text_tag: str = "recording_frame_text"
+    recording_selected_theme: int | None = None
     recordings_dir: Path | None = None
     recordings_list_tag: str = "recordings_list"
     recording_drawlist_tag: str = "recording_drawlist"

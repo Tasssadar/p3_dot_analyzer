@@ -1,8 +1,7 @@
 from p3_camera import P3Camera  # type: ignore
-from p3_viewer import apply_colormap, ColormapID  # type: ignore
+from p3_viewer import ColormapID  # type: ignore
 from dataclasses import dataclass, field
 import queue
-from typing import Any
 import threading
 from numpy.typing import NDArray
 import time
@@ -133,6 +132,10 @@ class RecordingReader:
         self._file.close()
 
     @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+    @property
     def ts_start(self) -> datetime:
         return self._read_ts(0)
 
@@ -141,11 +144,13 @@ class RecordingReader:
         return self._read_ts(self._frame_count - 1)
 
     def _read_ts(self, index: int) -> datetime:
-        buf = self._mmap[index * SAVED_FRAME_SIZE : (index + 1) * SAVED_FRAME_SIZE]
+        start = index * SAVED_FRAME_SIZE
+        buf = self._mmap[start : start + 8]
         unpacked = struct.unpack(
             "<q",
             buf,
         )
+
         return datetime.fromtimestamp(float(unpacked[0]) / 1000)
 
     def read_frame(self, index: int, config: RenderConfig) -> CamFrame:
@@ -154,7 +159,7 @@ class RecordingReader:
         data_end = data_start + CAMERA_WIDTH * CAMERA_HEIGHT * 2
 
         raw_thermal = np.frombuffer(self._mmap[data_start:data_end], dtype=np.uint16)
-        raw_thermal.reshape((CAMERA_HEIGHT, CAMERA_WIDTH))
+        raw_thermal = raw_thermal.reshape((CAMERA_HEIGHT, CAMERA_WIDTH))
 
         img = render(config, raw_thermal, RENDER_WIDTH, RENDER_HEIGHT)
         return CamFrame(

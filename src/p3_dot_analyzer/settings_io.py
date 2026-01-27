@@ -4,6 +4,8 @@ from pathlib import Path
 import json
 from typing import Any
 
+from p3_viewer import ColormapID  # type: ignore
+
 from .models import AppState, NamedArea, NamedAreaData, SettingsData
 
 
@@ -38,6 +40,11 @@ def _clamp_float(value: Any, min_value: float, max_value: float) -> float | None
     if isinstance(value, (int, float)):
         return max(min_value, min(max_value, float(value)))
     return None
+
+
+def _normalize_render_range(app_state: AppState) -> None:
+    if app_state.render_temp_max <= app_state.render_temp_min:
+        app_state.render_temp_max = app_state.render_temp_min + 0.1
 
 
 def _parse_named_areas(value: Any) -> list[NamedArea]:
@@ -103,6 +110,25 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
     if "named_areas" in settings:
         app_state.named_areas = _parse_named_areas(settings["named_areas"])
 
+    if "render_temp_min" in settings:
+        temp_min = _clamp_float(settings["render_temp_min"], -100.0, 1000.0)
+        if temp_min is not None:
+            app_state.render_temp_min = temp_min
+
+    if "render_temp_max" in settings:
+        temp_max = _clamp_float(settings["render_temp_max"], -100.0, 1000.0)
+        if temp_max is not None:
+            app_state.render_temp_max = temp_max
+
+    if "render_colormap" in settings:
+        name = settings["render_colormap"]
+        if isinstance(name, str):
+            mapping = {colormap.name: colormap for colormap in ColormapID}
+            if name in mapping:
+                app_state.render_colormap = mapping[name]
+
+    _normalize_render_range(app_state)
+
 
 def settings_from_state(app_state: AppState) -> SettingsData:
     named_areas: list[NamedAreaData] = [
@@ -125,6 +151,9 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         "min_circularity": app_state.min_circularity,
         "batch_sampling_rate": app_state.batch_sampling_rate,
         "named_areas": named_areas,
+        "render_temp_min": app_state.render_temp_min,
+        "render_temp_max": app_state.render_temp_max,
+        "render_colormap": app_state.render_colormap.name,
     }
 
 

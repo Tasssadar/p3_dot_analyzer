@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 import dearpygui.dearpygui as dpg  # type: ignore
 
+from .camera import CamFrame
 from .models import AppState
 from datetime import datetime
 
@@ -81,48 +82,33 @@ def update_color_display(app_state: AppState) -> None:
 
 def render_frame(
     app_state: AppState,
+    frame: CamFrame,
+    texture_tag: str,
+    draw_tag: str,
+    update_timestamp: bool = True,
     on_image_loaded: Callable[[AppState], None] | None = None,
 ) -> None:
-    """Load and display the current image from the repository.
+    """Load and display a frame into a specific texture/draw target."""
 
-    Args:
-        app_state: The application state.
-        on_image_loaded: Optional callback called after image is loaded,
-            typically used to redraw overlays.
-    """
+    if update_timestamp:
+        dpg.set_value(
+            app_state.timestamp_text_tag,
+            datetime.fromtimestamp(frame.ts).strftime("%Y-%m-%d %H:%M:%S"),
+        )
 
-    if app_state.current_frame is None:
-        return
-
-    dpg.set_value(
-        app_state.timestamp_text_tag,
-        datetime.fromtimestamp(app_state.current_frame.ts).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
-    )
-
-    # Update the dynamic texture and draw command
     dpg.configure_item(
-        app_state.texture_tag,
-        width=app_state.current_frame.width,
-        height=app_state.current_frame.height,
+        texture_tag,
+        width=frame.width,
+        height=frame.height,
     )
-    dpg.set_value(app_state.texture_tag, app_state.current_frame.img)
+    dpg.set_value(texture_tag, frame.img)
 
-    # Draw image from (0, 0) to (width, height) in the drawlist's space
-    if dpg.does_item_exist(app_state.image_draw_tag):
+    if dpg.does_item_exist(draw_tag):
         dpg.configure_item(
-            app_state.image_draw_tag,
+            draw_tag,
             pmin=(0, 0),
-            pmax=(app_state.current_frame.width, app_state.current_frame.height),
-        )
-    if dpg.does_item_exist(app_state.recording_draw_tag):
-        dpg.configure_item(
-            app_state.recording_draw_tag,
-            pmin=(0, 0),
-            pmax=(app_state.current_frame.width, app_state.current_frame.height),
+            pmax=(frame.width, frame.height),
         )
 
-    # Call optional callback (e.g., to redraw area overlays)
     if on_image_loaded is not None:
         on_image_loaded(app_state)

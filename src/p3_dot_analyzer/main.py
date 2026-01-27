@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import dearpygui.dearpygui as dpg  # type: ignore
 import os
+from p3_viewer import ColormapID  # type: ignore
 
 from .analysis import run_analysis, run_batch_analysis
 from .models import AppState
@@ -26,13 +27,16 @@ from .ui_helpers import (
     update_status,
     render_frame,
 )
+from .render import RenderConfig, render
 from .camera import (
     RENDER_HEIGHT,
     RENDER_WIDTH,
     Camera,
+    CamFrame,
     CamEvRecordingStats,
     CamEvVersion,
     CamEvConnectFailed,
+    RecordingReader,
 )
 import logging
 
@@ -72,9 +76,7 @@ def update_recording_indicator(
     else:
         duration_text = format_duration(stats.duration)
         size_text = format_bytes(stats.file_size_bytes)
-        text = (
-            f"{status_label} | {duration_text} | {stats.frame_count} frames | {size_text}"
-        )
+        text = f"{status_label} | {duration_text} | {stats.frame_count} frames | {size_text}"
     dpg.set_value(state.recording_status_tag, text)
 
 
@@ -275,6 +277,150 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         app_state.batch_sampling_rate = max(1, min(100, app_data))
         schedule_settings_save(app_state)
 
+    def normalize_render_range() -> None:
+        if app_state.render_temp_max <= app_state.render_temp_min:
+            app_state.render_temp_max = app_state.render_temp_min + 0.1
+            if dpg.does_item_exist(app_state.render_temp_max_input_tag):
+                dpg.set_value(
+                    app_state.render_temp_max_input_tag, app_state.render_temp_max
+                )
+
+    def build_render_config() -> RenderConfig:
+        normalize_render_range()
+        return RenderConfig(
+            temp_min=app_state.render_temp_min,
+            temp_max=app_state.render_temp_max,
+            colormap=app_state.render_colormap,
+        )
+
+    def rerender_current_frame() -> None:
+        if app_state.current_frame is None:
+            return
+        config = build_render_config()
+        img = render(
+            config, app_state.current_frame.raw_thermal, RENDER_WIDTH, RENDER_HEIGHT
+        )
+        app_state.current_frame = CamFrame(
+            width=RENDER_WIDTH,
+            height=RENDER_HEIGHT,
+            img=img,
+            raw_thermal=app_state.current_frame.raw_thermal,
+            ts=app_state.current_frame.ts,
+        )
+        render_frame(
+            app_state,
+            app_state.current_frame,
+            texture_tag=app_state.texture_tag,
+            draw_tag=app_state.image_draw_tag,
+            on_image_loaded=on_image_loaded_callback,
+        )
+
+    def update_recording_frame_text() -> None:
+        if not dpg.does_item_exist(app_state.recording_frame_text_tag):
+            return
+        if app_state.recording_frame_count <= 0:
+            dpg.set_value(app_state.recording_frame_text_tag, "No recording loaded")
+            return
+        dpg.set_value(
+            app_state.recording_frame_text_tag,
+            f"Frame {app_state.recording_frame_index + 1}/{app_state.recording_frame_count}",
+        )
+
+    def render_recording_frame(index: int) -> None:
+        if app_state.recording_reader is None:
+            return
+        if app_state.recording_frame_count <= 0:
+            return
+        index = max(0, min(app_state.recording_frame_count - 1, index))
+        app_state.recording_frame_index = index
+        if dpg.does_item_exist(app_state.slider_tag):
+            dpg.set_value(app_state.slider_tag, index)
+        config = build_render_config()
+        app_state.current_frame = app_state.recording_reader.read_frame(index, config)
+        render_frame(
+            app_state,
+            app_state.current_frame,
+            texture_tag=app_state.texture_tag,
+            draw_tag=app_state.image_draw_tag,
+            on_image_loaded=on_image_loaded_callback,
+        )
+        update_recording_frame_text()
+
+    def close_recording_reader() -> None:
+        if app_state.recording_reader is not None:
+            app_state.recording_reader.close()
+            app_state.recording_reader = None
+        app_state.recording_frame_count = 0
+        app_state.recording_frame_index = 0
+        if dpg.does_item_exist(app_state.slider_tag):
+            dpg.configure_item(
+                app_state.slider_tag, enabled=False, min_value=0, max_value=0
+            )
+            dpg.set_value(app_state.slider_tag, 0)
+        update_recording_frame_text()
+
+    def open_selected_recording() -> None:
+        close_recording_reader()
+        target = app_state.selected_recording_path
+        if target is None:
+            return
+        if app_state.recording_active and app_state.current_recording_path == target:
+            update_status(app_state, "Recording is active; stop it to analyze.")
+            return
+        try:
+            reader = RecordingReader(target)
+        except OSError as exc:
+            update_status(app_state, f"Failed to open recording: {exc}")
+            return
+        if reader.frame_count == 0:
+            reader.close()
+            update_status(app_state, "Recording is empty.")
+            return
+        app_state.recording_reader = reader
+        app_state.recording_frame_count = reader.frame_count
+        app_state.recording_frame_index = 0
+        if dpg.does_item_exist(app_state.slider_tag):
+            dpg.configure_item(
+                app_state.slider_tag,
+                enabled=True,
+                min_value=0,
+                max_value=app_state.recording_frame_count - 1,
+            )
+        render_recording_frame(app_state.recording_frame_index)
+
+    def apply_render_config() -> None:
+        config = build_render_config()
+        camera.set_render_config(config)
+        if (
+            app_state.recording_reader is not None
+            and app_state.active_tab == "analysis_tab"
+        ):
+            render_recording_frame(app_state.recording_frame_index)
+        else:
+            rerender_current_frame()
+
+    def on_render_temp_min_change(sender: int, app_data: float) -> None:
+        app_state.render_temp_min = float(app_data)
+        normalize_render_range()
+        schedule_settings_save(app_state)
+        apply_render_config()
+
+    def on_render_temp_max_change(sender: int, app_data: float) -> None:
+        app_state.render_temp_max = float(app_data)
+        normalize_render_range()
+        schedule_settings_save(app_state)
+        apply_render_config()
+
+    def on_render_colormap_change(sender: int, app_data: str) -> None:
+        mapping = {colormap.name: colormap for colormap in ColormapID}
+        if app_data in mapping:
+            app_state.render_colormap = mapping[app_data]
+            schedule_settings_save(app_state)
+            apply_render_config()
+
+    def on_recording_frame_change(sender: int, app_data: int) -> None:
+        render_recording_frame(int(app_data))
+
     def on_recording_frame_period_change(sender: int, app_data: int) -> None:
         """Handle recording frame period input change."""
         app_state.recording_frame_period_ms = max(1, min(10000, int(app_data)))
@@ -342,17 +488,21 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     return
                 app_state.selected_recording_path = user_data
                 update_status(app_state, f"Selected recording: {user_data.name}")
-                # TODO: Hook up playback for selected recording.
+                open_selected_recording()
                 refresh_recordings_list()
 
             with dpg.group(horizontal=True, parent=app_state.recordings_list_tag):
                 dpg.add_selectable(
-                    label=rec_path.name,
+                    label=f"▶ {rec_path.name}" if is_selected else rec_path.name,
                     default_value=is_selected,
                     callback=on_select,
                     user_data=rec_path,
                     width=210,
                 )
+                if is_selected and app_state.recording_selected_theme is not None:
+                    dpg.bind_item_theme(
+                        dpg.last_item(), app_state.recording_selected_theme
+                    )
 
                 def on_rename_clicked(
                     sender: int, app_data: None, user_data: Path
@@ -379,6 +529,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                             user_data.unlink()
                         if app_state.selected_recording_path == user_data:
                             app_state.selected_recording_path = None
+                            close_recording_reader()
                         update_status(app_state, f"Deleted recording: {user_data.name}")
                     except OSError as exc:
                         update_status(
@@ -423,6 +574,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 target_path.rename(new_path)
                 if app_state.selected_recording_path == target_path:
                     app_state.selected_recording_path = new_path
+                    open_selected_recording()
                 update_status(app_state, f"Renamed recording to: {new_path.name}")
             except OSError as exc:
                 update_status(
@@ -524,6 +676,14 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 )
         return theme  # type: ignore
 
+    if app_state.recording_selected_theme is None:
+        with dpg.theme() as theme:
+            with dpg.theme_component(dpg.mvSelectable):
+                dpg.add_theme_color(dpg.mvThemeCol_Header, (60, 120, 200, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, (80, 140, 220, 255))
+                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, (50, 110, 190, 255))
+        app_state.recording_selected_theme = theme
+
     with dpg.window(label="Image Viewer", tag="main_window", width=1300, height=760):
         dpg.add_text("", tag=app_state.status_text_tag)
 
@@ -544,21 +704,28 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 dpg.add_separator()
                 dpg.add_text("", tag=app_state.timestamp_text_tag)
 
-                def on_tab_change(sender: int, app_data: str) -> None:
-                    app_state.active_tab = app_data
+                def on_tab_change(sender: int, app_data: int, user_data: str) -> None:
+                    # No idea what the ID is
+                    app_state.active_tab = (
+                        "recording_tab" if app_data == 41 else "analysis_tab"
+                    )
 
-                with dpg.tab_bar(callback=on_tab_change):
-                    with dpg.tab(label="Recording", tag="recording_tab"):
+                with dpg.tab_bar(tag="tab_bar", callback=on_tab_change):
+                    with dpg.tab(
+                        label="Recording",
+                        tag="recording_tab",
+                        user_data="recording_tab",
+                    ):
                         with dpg.group(horizontal=True):
                             with dpg.group():
                                 dpg.add_text("Camera")
                                 with dpg.drawlist(
-                                    width=800,
-                                    height=600,
+                                    width=RENDER_WIDTH,
+                                    height=RENDER_HEIGHT,
                                     tag=app_state.recording_drawlist_tag,
                                 ):
                                     dpg.draw_image(
-                                        app_state.texture_tag,
+                                        app_state.recording_texture_tag,
                                         pmin=(0, 0),
                                         pmax=(1, 1),  # updated on render
                                         tag=app_state.recording_draw_tag,
@@ -566,9 +733,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                             with dpg.group():
                                 dpg.add_text("Recording Controls")
                                 dpg.add_separator()
-                                dpg.add_text(
-                                    "Idle", tag=app_state.recording_status_tag
-                                )
+                                dpg.add_text("Idle", tag=app_state.recording_status_tag)
                                 dpg.add_input_int(
                                     label="Frame period (ms)",
                                     default_value=app_state.recording_frame_period_ms,
@@ -617,7 +782,8 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     app_state.recording_active = True
                                     app_state.recording_paused = False
                                     dpg.configure_item(
-                                        app_state.recording_pause_button_tag, label="Pause"
+                                        app_state.recording_pause_button_tag,
+                                        label="Pause",
                                     )
                                     update_recording_buttons(app_state)
                                     update_recording_indicator(app_state, "Recording")
@@ -676,7 +842,8 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     app_state.recording_active = False
                                     app_state.recording_paused = False
                                     dpg.configure_item(
-                                        app_state.recording_pause_button_tag, label="Pause"
+                                        app_state.recording_pause_button_tag,
+                                        label="Pause",
                                     )
                                     update_recording_buttons(app_state)
                                     update_recording_indicator(app_state, "Idle")
@@ -710,14 +877,16 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                 )
                                 update_recording_buttons(app_state)
 
-                    with dpg.tab(label="Analysis", tag="analysis_tab"):
+                    with dpg.tab(
+                        label="Analysis", tag="analysis_tab", user_data="analysis_tab"
+                    ):
                         with dpg.group(horizontal=True):
                             # Left side: image area
                             with dpg.group():
                                 dpg.add_text("Image")
                                 with dpg.drawlist(
-                                    width=800,
-                                    height=600,
+                                    width=RENDER_WIDTH,
+                                    height=RENDER_HEIGHT,
                                     tag=app_state.image_drawlist_tag,
                                 ):
                                     dpg.draw_image(
@@ -730,6 +899,50 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                             # Right side: controls
                             with dpg.group():
                                 dpg.add_separator()
+                                dpg.add_text("Playback")
+                                dpg.add_slider_int(
+                                    label="Frame",
+                                    tag=app_state.slider_tag,
+                                    default_value=app_state.recording_frame_index,
+                                    min_value=0,
+                                    max_value=max(
+                                        0, app_state.recording_frame_count - 1
+                                    ),
+                                    callback=on_recording_frame_change,
+                                    width=220,
+                                    enabled=app_state.recording_reader is not None,
+                                )
+                                dpg.add_text(
+                                    "No recording loaded",
+                                    tag=app_state.recording_frame_text_tag,
+                                )
+
+                                dpg.add_separator()
+                                dpg.add_text("Render Config")
+                                dpg.add_input_float(
+                                    label="Temp Min (C)",
+                                    default_value=app_state.render_temp_min,
+                                    callback=on_render_temp_min_change,
+                                    tag=app_state.render_temp_min_input_tag,
+                                    width=120,
+                                    format="%.2f",
+                                )
+                                dpg.add_input_float(
+                                    label="Temp Max (C)",
+                                    default_value=app_state.render_temp_max,
+                                    callback=on_render_temp_max_change,
+                                    tag=app_state.render_temp_max_input_tag,
+                                    width=120,
+                                    format="%.2f",
+                                )
+                                dpg.add_combo(
+                                    label="Colormap",
+                                    items=[colormap.name for colormap in ColormapID],
+                                    default_value=app_state.render_colormap.name,
+                                    callback=on_render_colormap_change,
+                                    tag=app_state.render_colormap_combo_tag,
+                                    width=160,
+                                )
 
                                 # Color picker display
                                 dpg.add_separator()
@@ -837,6 +1050,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     tag=app_state.batch_analyze_button_tag,
                                 )
 
+    update_recording_frame_text()
     refresh_recordings_list()
 
     # Global mouse handlers for color picking and area creation
@@ -862,9 +1076,11 @@ def run() -> None:
 
     dpg.create_context()
 
-    texture_tag = "image_texture"
+    texture_tag = "analysis_texture"
+    recording_texture_tag = "recording_texture"
     app_state = AppState(
         texture_tag=texture_tag,
+        recording_texture_tag=recording_texture_tag,
         image_drawlist_tag="image_drawlist",
         image_draw_tag="image_draw",
         slider_tag="image_slider",
@@ -880,12 +1096,28 @@ def run() -> None:
     if settings is not None:
         apply_settings_to_state(app_state, settings)
 
+    if app_state.render_temp_max <= app_state.render_temp_min:
+        app_state.render_temp_max = app_state.render_temp_min + 0.1
+    camera.set_render_config(
+        RenderConfig(
+            temp_min=app_state.render_temp_min,
+            temp_max=app_state.render_temp_max,
+            colormap=app_state.render_colormap,
+        )
+    )
+
     with dpg.texture_registry():
         dpg.add_dynamic_texture(
             RENDER_WIDTH,
             RENDER_HEIGHT,
             [0] * RENDER_WIDTH * RENDER_HEIGHT * 4,
             tag=texture_tag,
+        )
+        dpg.add_dynamic_texture(
+            RENDER_WIDTH,
+            RENDER_HEIGHT,
+            [0] * RENDER_WIDTH * RENDER_HEIGHT * 4,
+            tag=recording_texture_tag,
         )
 
     build_ui(app_state, camera)
@@ -924,9 +1156,15 @@ def run() -> None:
                     update_recording_indicator(app_state, status_label, ev)
 
             frame = camera.take_frame()
-            if frame is not None:
-                app_state.current_frame = frame
-                render_frame(app_state, on_image_loaded=on_image_loaded_callback)
+
+            if app_state.active_tab == "recording_tab" and frame is not None:
+                render_frame(
+                    app_state,
+                    frame,
+                    texture_tag=app_state.recording_texture_tag,
+                    draw_tag=app_state.recording_draw_tag,
+                    update_timestamp=False,
+                )
 
             dpg.render_dearpygui_frame()
     finally:
