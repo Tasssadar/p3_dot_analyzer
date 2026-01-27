@@ -10,6 +10,10 @@ import time
 import cv2
 import numpy as np
 from logging import getLogger
+from pathlib import Path
+from datetime import timedelta
+from compression import zstd
+import struct
 
 logger = getLogger(__name__)
 
@@ -19,6 +23,8 @@ CAMERA_HEIGHT = 192
 RENDER_SCALE = 2
 RENDER_WIDTH = CAMERA_WIDTH * RENDER_SCALE
 RENDER_HEIGHT = CAMERA_HEIGHT * RENDER_SCALE
+
+SAVED_FRAME_SIZE = RENDER_WIDTH * RENDER_HEIGHT * 3 * 2
 
 
 @dataclass(slots=True, frozen=True)
@@ -32,7 +38,14 @@ class CamEvVersion:
     version: str
 
 
-CameraEvents = CamEvConnectFailed | CamEvVersion
+@dataclass(slots=True, frozen=True)
+class CamEvRecordingStats:
+    duration: timedelta
+    frame_count: int
+    file_size_bytes: int
+
+
+CameraEvents = CamEvConnectFailed | CamEvVersion | CamEvRecordingStats
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,6 +54,71 @@ class CamFrame:
     height: int
     img: NDArray[np.float32]
     ts: float = field(default_factory=time.time)
+
+
+@dataclass(slots=True, frozen=True)
+class _RecorderFrame:
+    raw_thermal: NDArray[np.uint16]
+    ts: float = field(default_factory=time.time)
+
+
+class Recorder:
+    def __init__(self, dest_path: Path, frame_period: timedelta) -> None:
+        self._frame_period_sec = frame_period.total_seconds()
+        self._last_frame_ts = 0.0
+        self._start_ts = time.monotonic()
+        self._frame_count = 0
+
+        self._thread = threading.Thread(target=self._thread_body)
+        self._thread.start()
+
+        self._frames_queue = queue.Queue[_RecorderFrame](maxsize=2)
+
+        self._file = zstd.open(dest_path, "wb", level=5)
+        self._stats_lock = threading.Lock()
+
+    def stop(self) -> None:
+        self._frames_queue.shutdown()
+        self._thread.join()
+
+        self._file.close()
+
+    def on_frame(self, raw_thermal: NDArray[np.uint16]) -> None:
+        now = time.monotonic()
+        if now - self._last_frame_ts < self._frame_period_sec:
+            return
+
+        try:
+            self._frames_queue.put_nowait(_RecorderFrame(raw_thermal))
+            self._last_frame_ts = now
+        except queue.Full:
+            logger.warning("Recorder frames queue is full, dropping frame")
+
+    def stats(self) -> CamEvRecordingStats:
+        with self._stats_lock:
+            return CamEvRecordingStats(
+                duration=timedelta(seconds=time.monotonic() - self._start_ts),
+                frame_count=self._frame_count,
+                file_size_bytes=self._file.tell(),
+            )
+
+    def _thread_body(self) -> None:
+        while True:
+            try:
+                frame = self._frames_queue.get(block=False)
+
+                ts_data = struct.pack("<q", int(frame.ts * 1000))
+                data = frame.raw_thermal.tobytes("C")
+                del frame
+
+                with self._stats_lock:
+                    self._file.write(ts_data)
+                    print(len(data), SAVED_FRAME_SIZE)
+                    self._file.write(data)
+                    self._frame_count += 1
+                del data
+            except queue.ShutDown:
+                break
 
 
 class Camera:
@@ -58,10 +136,18 @@ class Camera:
         self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         self._camera_thread = threading.Thread(target=self._camera_thread_body)
 
+        self._recorder_lock = threading.Lock()
+        self._recorder: Recorder | None = None
+        self._recorder_paused = False
+        self._recorder_stats_ts = 0.0
+
     def start(self) -> None:
         self._camera_thread.start()
 
     def stop(self) -> None:
+        if self._recorder is not None:
+            self._recorder.stop()
+            self._recorder = None
         self._ev_stop_thread.set()
         self._camera_thread.join()
 
@@ -78,6 +164,23 @@ class Camera:
             return self._queue_events.get(block=False)
         except queue.Empty:
             return None
+
+    def start_recording(self, dest_path: Path, frame_period: timedelta) -> None:
+        with self._recorder_lock:
+            if self._recorder is not None:
+                raise ValueError("Recording already started")
+            self._recorder = Recorder(dest_path, frame_period)
+
+    def stop_recording(self) -> None:
+        with self._recorder_lock:
+            if self._recorder is None:
+                raise ValueError("Recording not started")
+            self._recorder.stop()
+            self._recorder = None
+
+    def pause_recording(self, paused: bool) -> None:
+        with self._recorder_lock:
+            self._recorder_paused = paused
 
     def _camera_thread_body(self) -> None:
         while not self._ev_stop_thread.is_set():
@@ -103,6 +206,14 @@ class Camera:
 
                     thermal_raw = self.tnr(thermal_raw, last_thermal)
                     last_thermal = thermal_raw
+
+                    with self._recorder_lock:
+                        if self._recorder is not None and not self._recorder_paused:
+                            self._recorder.on_frame(thermal_raw)
+
+                            if time.monotonic() - self._recorder_stats_ts > 1.0:
+                                self._queue_events.put(self._recorder.stats())
+                                self._recorder_stats_ts = time.monotonic()
 
                     img = self._render(thermal_raw)
 

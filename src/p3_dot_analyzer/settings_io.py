@@ -103,11 +103,6 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
     if "named_areas" in settings:
         app_state.named_areas = _parse_named_areas(settings["named_areas"])
 
-    if "current_index" in settings:
-        index = _clamp_int(settings["current_index"], 0, 10**9)
-        if index is not None:
-            app_state.repo.set_index(index)
-
 
 def settings_from_state(app_state: AppState) -> SettingsData:
     named_areas: list[NamedAreaData] = [
@@ -130,7 +125,6 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         "min_circularity": app_state.min_circularity,
         "batch_sampling_rate": app_state.batch_sampling_rate,
         "named_areas": named_areas,
-        "current_index": app_state.repo.get_current_index(),
     }
 
 
