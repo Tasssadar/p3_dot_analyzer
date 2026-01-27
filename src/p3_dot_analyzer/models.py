@@ -96,9 +96,16 @@ class AppState:
     recordings_list_tag: str = "recordings_list"
     recording_drawlist_tag: str = "recording_drawlist"
     recording_draw_tag: str = "recording_draw"
+    recording_status_tag: str = "recording_status_text"
+    recording_frame_period_ms: int = 500
+    recording_frame_period_input_tag: str = "recording_frame_period_input"
+    recording_start_button_tag: str = "recording_start_button"
+    recording_pause_button_tag: str = "recording_pause_button"
+    recording_stop_button_tag: str = "recording_stop_button"
     rename_modal_tag: str = "rename_recording_modal"
     rename_input_tag: str = "rename_recording_input"
     active_tab: str = "analysis_tab"
+    camera_connected: bool = False
     # Settings persistence
     settings_path: Path | None = None
     settings_save_timer: Timer | None = None

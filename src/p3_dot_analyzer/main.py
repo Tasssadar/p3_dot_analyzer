@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import dearpygui.dearpygui as dpg  # type: ignore
 import os
@@ -30,6 +30,7 @@ from .camera import (
     RENDER_HEIGHT,
     RENDER_WIDTH,
     Camera,
+    CamEvRecordingStats,
     CamEvVersion,
     CamEvConnectFailed,
 )
@@ -43,7 +44,52 @@ def on_image_loaded_callback(state: AppState) -> None:
         run_analysis(state)
 
 
-def build_ui(app_state: AppState) -> None:
+def format_duration(duration: timedelta) -> str:
+    total_seconds = int(duration.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
+def format_bytes(size_bytes: int) -> str:
+    size = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0 or unit == "GB":
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{int(size_bytes)} B"
+
+
+def update_recording_indicator(
+    state: AppState, status_label: str, stats: CamEvRecordingStats | None = None
+) -> None:
+    if stats is None:
+        text = status_label
+    else:
+        duration_text = format_duration(stats.duration)
+        size_text = format_bytes(stats.file_size_bytes)
+        text = (
+            f"{status_label} | {duration_text} | {stats.frame_count} frames | {size_text}"
+        )
+    dpg.set_value(state.recording_status_tag, text)
+
+
+def update_recording_buttons(state: AppState) -> None:
+    start_enabled = state.camera_connected and (
+        not state.recording_active or state.recording_paused
+    )
+    pause_enabled = state.recording_active
+    stop_enabled = state.recording_active
+    dpg.configure_item(state.recording_start_button_tag, enabled=start_enabled)
+    dpg.configure_item(state.recording_pause_button_tag, enabled=pause_enabled)
+    dpg.configure_item(state.recording_stop_button_tag, enabled=stop_enabled)
+
+
+def build_ui(app_state: AppState, camera: Camera) -> None:
     """Create Dear PyGui windows and widgets."""
 
     def on_mode_button_clicked(
@@ -228,6 +274,10 @@ def build_ui(app_state: AppState) -> None:
         """Handle sampling rate input change."""
         app_state.batch_sampling_rate = max(1, min(100, app_data))
         schedule_settings_save(app_state)
+
+    def on_recording_frame_period_change(sender: int, app_data: int) -> None:
+        """Handle recording frame period input change."""
+        app_state.recording_frame_period_ms = max(1, min(10000, int(app_data)))
 
     def on_batch_analyze_clicked(sender: int, app_data: None) -> None:
         """Handle batch analysis button click."""
@@ -516,31 +566,30 @@ def build_ui(app_state: AppState) -> None:
                             with dpg.group():
                                 dpg.add_text("Recording Controls")
                                 dpg.add_separator()
-
-                                start_button_tag = "recording_start_button"
-                                pause_button_tag = "recording_pause_button"
-                                stop_button_tag = "recording_stop_button"
-
-                                def update_recording_buttons() -> None:
-                                    start_enabled = (
-                                        not app_state.recording_active
-                                        or app_state.recording_paused
-                                    )
-                                    pause_enabled = app_state.recording_active
-                                    stop_enabled = app_state.recording_active
-                                    dpg.configure_item(
-                                        start_button_tag, enabled=start_enabled
-                                    )
-                                    dpg.configure_item(
-                                        pause_button_tag, enabled=pause_enabled
-                                    )
-                                    dpg.configure_item(
-                                        stop_button_tag, enabled=stop_enabled
-                                    )
+                                dpg.add_text(
+                                    "Idle", tag=app_state.recording_status_tag
+                                )
+                                dpg.add_input_int(
+                                    label="Frame period (ms)",
+                                    default_value=app_state.recording_frame_period_ms,
+                                    min_value=1,
+                                    max_value=10000,
+                                    min_clamped=True,
+                                    max_clamped=True,
+                                    callback=on_recording_frame_period_change,
+                                    tag=app_state.recording_frame_period_input_tag,
+                                    width=140,
+                                )
 
                                 def on_start_recording(
                                     sender: int, app_data: None
                                 ) -> None:
+                                    if not app_state.camera_connected:
+                                        update_status(
+                                            app_state,
+                                            "Camera not connected. Connect the camera first.",
+                                        )
+                                        return
                                     if app_state.recording_active:
                                         update_status(
                                             app_state, "Recording already in progress."
@@ -549,18 +598,33 @@ def build_ui(app_state: AppState) -> None:
                                     recordings_dir = get_recordings_dir()
                                     recordings_dir.mkdir(parents=True, exist_ok=True)
                                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                    app_state.current_recording_path = (
+                                    recording_path = (
                                         recordings_dir / f"recording_{timestamp}.mp4"
                                     )
+                                    frame_period = timedelta(
+                                        milliseconds=app_state.recording_frame_period_ms
+                                    )
+                                    try:
+                                        camera.start_recording(
+                                            recording_path, frame_period
+                                        )
+                                    except ValueError as exc:
+                                        update_status(
+                                            app_state, f"Recording start failed: {exc}"
+                                        )
+                                        return
+                                    app_state.current_recording_path = recording_path
                                     app_state.recording_active = True
                                     app_state.recording_paused = False
-                                    dpg.configure_item(pause_button_tag, label="Pause")
-                                    update_recording_buttons()
+                                    dpg.configure_item(
+                                        app_state.recording_pause_button_tag, label="Pause"
+                                    )
+                                    update_recording_buttons(app_state)
+                                    update_recording_indicator(app_state, "Recording")
                                     update_status(
                                         app_state,
-                                        f"Recording started: {app_state.current_recording_path.name}",
+                                        f"Recording started: {recording_path.name}",
                                     )
-                                    # TODO: Start writing frames to MP4.
 
                                 def on_pause_recording(
                                     sender: int, app_data: None
@@ -573,20 +637,26 @@ def build_ui(app_state: AppState) -> None:
                                     app_state.recording_paused = (
                                         not app_state.recording_paused
                                     )
+                                    camera.pause_recording(app_state.recording_paused)
                                     dpg.configure_item(
-                                        pause_button_tag,
+                                        app_state.recording_pause_button_tag,
                                         label="Resume"
                                         if app_state.recording_paused
                                         else "Pause",
                                     )
-                                    update_recording_buttons()
+                                    update_recording_buttons(app_state)
+                                    update_recording_indicator(
+                                        app_state,
+                                        "Paused"
+                                        if app_state.recording_paused
+                                        else "Recording",
+                                    )
                                     update_status(
                                         app_state,
                                         "Recording paused."
                                         if app_state.recording_paused
                                         else "Recording resumed.",
                                     )
-                                    # TODO: Pause/resume writing frames.
 
                                 def on_stop_recording(
                                     sender: int, app_data: None
@@ -596,28 +666,37 @@ def build_ui(app_state: AppState) -> None:
                                             app_state, "No active recording to stop."
                                         )
                                         return
+                                    try:
+                                        camera.stop_recording()
+                                    except ValueError as exc:
+                                        update_status(
+                                            app_state, f"Recording stop failed: {exc}"
+                                        )
+                                        return
                                     app_state.recording_active = False
                                     app_state.recording_paused = False
-                                    dpg.configure_item(pause_button_tag, label="Pause")
-                                    update_recording_buttons()
+                                    dpg.configure_item(
+                                        app_state.recording_pause_button_tag, label="Pause"
+                                    )
+                                    update_recording_buttons(app_state)
+                                    update_recording_indicator(app_state, "Idle")
                                     update_status(
                                         app_state,
                                         "Recording stopped.",
                                     )
-                                    # TODO: Finalize and close MP4 writer.
                                     app_state.current_recording_path = None
                                     refresh_recordings_list()
 
                                 dpg.add_button(
                                     label="Start",
                                     callback=on_start_recording,
-                                    tag=start_button_tag,
+                                    tag=app_state.recording_start_button_tag,
                                     width=200,
                                     height=50,
                                 )
                                 dpg.add_button(
                                     label="Pause",
-                                    tag=pause_button_tag,
+                                    tag=app_state.recording_pause_button_tag,
                                     callback=on_pause_recording,
                                     width=200,
                                     height=50,
@@ -625,11 +704,11 @@ def build_ui(app_state: AppState) -> None:
                                 dpg.add_button(
                                     label="Stop",
                                     callback=on_stop_recording,
-                                    tag=stop_button_tag,
+                                    tag=app_state.recording_stop_button_tag,
                                     width=200,
                                     height=50,
                                 )
-                                update_recording_buttons()
+                                update_recording_buttons(app_state)
 
                     with dpg.tab(label="Analysis", tag="analysis_tab"):
                         with dpg.group(horizontal=True):
@@ -809,7 +888,7 @@ def run() -> None:
             tag=texture_tag,
         )
 
-    build_ui(app_state)
+    build_ui(app_state, camera)
     update_color_display(app_state)
     update_areas_list(app_state)
 
@@ -826,11 +905,23 @@ def run() -> None:
             ev = camera.get_event()
             match ev:
                 case CamEvVersion():
+                    app_state.camera_connected = True
                     update_status(
                         app_state, f"Camera connected: {ev.name} {ev.version}"
                     )
+                    update_recording_buttons(app_state)
                 case CamEvConnectFailed():
+                    app_state.camera_connected = False
                     update_status(app_state, f"Connect failed: {ev.message}")
+                    update_recording_buttons(app_state)
+                case CamEvRecordingStats():
+                    if app_state.recording_active:
+                        status_label = (
+                            "Paused" if app_state.recording_paused else "Recording"
+                        )
+                    else:
+                        status_label = "Idle"
+                    update_recording_indicator(app_state, status_label, ev)
 
             frame = camera.take_frame()
             if frame is not None:
