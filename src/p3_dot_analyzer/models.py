@@ -7,6 +7,7 @@ from typing import TypedDict
 from p3_viewer import ColormapID  # type: ignore
 
 from .camera import CamFrame, RecordingReader
+from .render import RenderConfig
 
 IMAGES_PER_SECOND = 25
 
@@ -31,7 +32,7 @@ class NamedAreaData(TypedDict):
 
 
 class SettingsData(TypedDict, total=False):
-    selected_color: list[int] | None
+    selected_temp: float | None
     analysis_mode_enabled: bool
     color_tolerance: int
     min_area: int
@@ -69,8 +70,8 @@ class AppState:
     render_temp_min_input_tag: str = "render_temp_min_input"
     render_temp_max_input_tag: str = "render_temp_max_input"
     render_colormap_combo_tag: str = "render_colormap_combo"
-    # Color picker state
-    selected_color: tuple[int, int, int] | None = (163, 163, 163)
+    # Temperature selection state
+    selected_temp: float | None = None
     color_swatch_tag: str = "color_swatch"
     color_text_tag: str = "color_text"
     hover_temp_text_tag: str = "hover_temp_text"
@@ -127,3 +128,10 @@ class AppState:
     # Settings persistence
     settings_path: Path | None = None
     settings_save_timer: Timer | None = None
+
+    def build_render_config(self) -> RenderConfig:
+        return RenderConfig(
+            temp_min=self.render_temp_min,
+            temp_max=self.render_temp_max,
+            colormap=self.render_colormap,
+        )

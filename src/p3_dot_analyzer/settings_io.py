@@ -72,16 +72,10 @@ def _parse_named_areas(value: Any) -> list[NamedArea]:
 
 
 def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None:
-    if "selected_color" in settings:
-        color = settings["selected_color"]
-        if color is None:
-            app_state.selected_color = None
-        elif isinstance(color, list) and len(color) == 3:
-            r = _clamp_int(color[0], 0, 255)
-            g = _clamp_int(color[1], 0, 255)
-            b = _clamp_int(color[2], 0, 255)
-            if r is not None and g is not None and b is not None:
-                app_state.selected_color = (r, g, b)
+    if "selected_temp" in settings:
+        temp = _clamp_float(settings["selected_temp"], -100.0, 1000.0)
+        if temp is not None:
+            app_state.selected_temp = temp
 
     if "analysis_mode_enabled" in settings:
         if isinstance(settings["analysis_mode_enabled"], bool):
@@ -142,9 +136,7 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         for area in app_state.named_areas
     ]
     return {
-        "selected_color": list(app_state.selected_color)
-        if app_state.selected_color is not None
-        else None,
+        "selected_temp": app_state.selected_temp,
         "analysis_mode_enabled": app_state.analysis_mode_enabled,
         "color_tolerance": app_state.color_tolerance,
         "min_area": app_state.min_area,

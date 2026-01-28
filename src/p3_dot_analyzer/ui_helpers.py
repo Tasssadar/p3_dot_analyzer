@@ -9,6 +9,7 @@ from .models import AppState
 from datetime import datetime
 
 from p3_camera import raw_to_celsius
+from p3_viewer import get_colormap
 
 
 def update_status(app_state: AppState, message: str) -> None:
@@ -45,25 +46,6 @@ def screen_to_image_coords(
     return (int(local_x), int(local_y))
 
 
-def sample_color_at(
-    app_state: AppState, img_x: int, img_y: int
-) -> tuple[int, int, int] | None:
-    """Sample the RGB color at the given image coordinates."""
-    if app_state.current_frame is None:
-        return None
-
-    # Bounds check
-    h = app_state.current_frame.height
-    w = app_state.current_frame.width
-    if img_x < 0 or img_x >= w or img_y < 0 or img_y >= h:
-        return None
-
-    # OpenCV loads images in BGR format
-    bgr = app_state.current_frame.img[img_y, img_x]
-    # Convert to RGB
-    return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
-
-
 def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
     """Get the temperature at the given image coordinates."""
     if app_state.current_frame is None:
@@ -78,21 +60,35 @@ def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
     img_y = img_y // RENDER_SCALE
     img_x = img_x // RENDER_SCALE
 
-    return raw_to_celsius(float(app_state.current_frame.raw_thermal[img_y, img_x]))  # type: ignore
+    return float(
+        raw_to_celsius(float(app_state.current_frame.raw_thermal[img_y, img_x]))
+    )
+
+
+def color_for_temp(app_state: AppState, temp: float) -> tuple[int, int, int]:
+    raw_min = app_state.render_temp_min
+    raw_max = app_state.render_temp_max
+    normalized = int(min(1.0, max(0.0, (temp - raw_min) / (raw_max - raw_min))) * 255)
+
+    bgr = get_colormap(app_state.render_colormap)[normalized]
+
+    return int(bgr[2]), int(bgr[1]), int(bgr[0])
 
 
 def update_color_display(app_state: AppState) -> None:
-    """Update the color swatch and text display with the selected color."""
-    if app_state.selected_color is None:
-        dpg.set_value(app_state.color_text_tag, "No color selected")
+    """Update the swatch and text display with the selected temperature."""
+    if app_state.selected_temp is None:
+        dpg.set_value(app_state.color_text_tag, "No temperature selected")
         # Draw a gray swatch to indicate no selection
         dpg.configure_item(
             app_state.color_swatch_tag,
             fill=(128, 128, 128, 255),
         )
     else:
-        r, g, b = app_state.selected_color
-        dpg.set_value(app_state.color_text_tag, f"RGB({r}, {g}, {b})")
+        r, g, b = color_for_temp(app_state, app_state.selected_temp)
+        dpg.set_value(
+            app_state.color_text_tag, f"Temp: {app_state.selected_temp:.2f} C"
+        )
         # Update the swatch color
         dpg.configure_item(
             app_state.color_swatch_tag,

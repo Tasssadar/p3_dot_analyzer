@@ -22,7 +22,6 @@ from .settings_io import (
 )
 from .ui_helpers import (
     screen_to_image_coords,
-    sample_color_at,
     get_temp_at,
     update_color_display,
     update_status,
@@ -111,7 +110,9 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             user_data.interaction_mode = "view"
             user_data.drag_start = None
             dpg.configure_item(user_data.mode_button_tag, label="Create Area")
-            update_status(user_data, "View mode: click on image to pick a color")
+            update_status(
+                user_data, "View mode: click on image to select a temperature"
+            )
             # Remove preview rectangle if exists
             if dpg.does_item_exist(user_data.preview_rect_tag):
                 dpg.delete_item(user_data.preview_rect_tag)
@@ -124,17 +125,17 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
 
         if app_state.interaction_mode == "view":
-            # Color picker mode - sample color at click position
+            # Temperature picker mode - sample temp at click position
             img_coords = screen_to_image_coords(app_state, mouse_x, mouse_y)
             if img_coords is not None:
-                color = sample_color_at(app_state, img_coords[0], img_coords[1])
-                if color is not None:
-                    app_state.selected_color = color
+                temp = get_temp_at(app_state, img_coords[0], img_coords[1])
+                if temp is not None:
+                    app_state.selected_temp = temp
                     update_color_display(app_state)
                     schedule_settings_save(app_state)
                     update_status(
                         app_state,
-                        f"Selected color at ({img_coords[0]}, {img_coords[1]}): RGB{color}",
+                        f"Selected temp at ({img_coords[0]}, {img_coords[1]}): {temp:.2f} C",
                     )
                     # Run analysis if analysis mode is enabled
                     if app_state.analysis_mode_enabled:
@@ -253,10 +254,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         if app_data:
             update_status(app_state, "Analysis mode enabled - detecting marks...")
             run_analysis(app_state)
-            if app_state.selected_color is None:
+            if app_state.selected_temp is None:
                 update_status(
                     app_state,
-                    "Analysis mode enabled - click on image to select a color",
+                    "Analysis mode enabled - click on image to select a temperature",
                 )
             else:
                 mark_count = sum(app_state.area_mark_counts.values())
@@ -299,18 +300,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     app_state.render_temp_max_input_tag, app_state.render_temp_max
                 )
 
-    def build_render_config() -> RenderConfig:
-        normalize_render_range()
-        return RenderConfig(
-            temp_min=app_state.render_temp_min,
-            temp_max=app_state.render_temp_max,
-            colormap=app_state.render_colormap,
-        )
-
     def rerender_current_frame() -> None:
         if app_state.current_frame is None:
             return
-        config = build_render_config()
+        config = app_state.build_render_config()
         img = render(
             config, app_state.current_frame.raw_thermal, RENDER_WIDTH, RENDER_HEIGHT
         )
@@ -349,7 +342,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         app_state.recording_frame_index = index
         if dpg.does_item_exist(app_state.slider_tag):
             dpg.set_value(app_state.slider_tag, index)
-        config = build_render_config()
+        config = app_state.build_render_config()
         app_state.current_frame = app_state.recording_reader.read_frame(index, config)
         render_frame(
             app_state,
@@ -403,7 +396,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         render_recording_frame(app_state.recording_frame_index)
 
     def apply_render_config() -> None:
-        config = build_render_config()
+        config = app_state.build_render_config()
         camera.set_render_config(config)
         if (
             app_state.recording_reader is not None
@@ -418,12 +411,18 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         normalize_render_range()
         schedule_settings_save(app_state)
         apply_render_config()
+        update_color_display(app_state)
+        if app_state.analysis_mode_enabled:
+            run_analysis(app_state)
 
     def on_render_temp_max_change(sender: int, app_data: float) -> None:
         app_state.render_temp_max = float(app_data)
         normalize_render_range()
         schedule_settings_save(app_state)
         apply_render_config()
+        update_color_display(app_state)
+        if app_state.analysis_mode_enabled:
+            run_analysis(app_state)
 
     def on_render_colormap_change(sender: int, app_data: str) -> None:
         mapping = {colormap.name: colormap for colormap in ColormapID}
@@ -431,6 +430,9 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             app_state.render_colormap = mapping[app_data]
             schedule_settings_save(app_state)
             apply_render_config()
+            update_color_display(app_state)
+            if app_state.analysis_mode_enabled:
+                run_analysis(app_state)
 
     def on_recording_frame_change(sender: int, app_data: int) -> None:
         render_recording_frame(int(app_data))
@@ -442,8 +444,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     def on_batch_analyze_clicked(sender: int, app_data: None) -> None:
         """Handle batch analysis button click."""
         # Validate prerequisites
-        if app_state.selected_color is None:
-            update_status(app_state, "Please select a color first (click on image)")
+        if app_state.selected_temp is None:
+            update_status(
+                app_state, "Please select a temperature first (click on image)"
+            )
             return
 
         if not app_state.named_areas:
@@ -484,7 +488,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         recordings_dir = get_recordings_dir()
         if not recordings_dir.exists():
             return []
-        return sorted(recordings_dir.glob("*.mp4"), key=lambda p: p.name.lower())
+        return sorted(recordings_dir.glob("*.p3dat"), key=lambda p: p.name.lower())
 
     def refresh_recordings_list() -> None:
         if not dpg.does_item_exist(app_state.recordings_list_tag):
@@ -778,7 +782,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     recordings_dir.mkdir(parents=True, exist_ok=True)
                                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                                     recording_path = (
-                                        recordings_dir / f"recording_{timestamp}.mp4"
+                                        recordings_dir / f"recording_{timestamp}.p3dat"
                                     )
                                     frame_period = timedelta(
                                         milliseconds=app_state.recording_frame_period_ms
@@ -937,34 +941,38 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
 
                                 dpg.add_separator()
                                 dpg.add_text("Render Config")
-                                dpg.add_input_float(
-                                    label="Temp Min (C)",
-                                    default_value=app_state.render_temp_min,
-                                    callback=on_render_temp_min_change,
-                                    tag=app_state.render_temp_min_input_tag,
-                                    width=120,
-                                    format="%.2f",
-                                )
-                                dpg.add_input_float(
-                                    label="Temp Max (C)",
-                                    default_value=app_state.render_temp_max,
-                                    callback=on_render_temp_max_change,
-                                    tag=app_state.render_temp_max_input_tag,
-                                    width=120,
-                                    format="%.2f",
-                                )
-                                dpg.add_combo(
-                                    label="Colormap",
-                                    items=[colormap.name for colormap in ColormapID],
-                                    default_value=app_state.render_colormap.name,
-                                    callback=on_render_colormap_change,
-                                    tag=app_state.render_colormap_combo_tag,
-                                    width=160,
-                                )
+                                with dpg.group(horizontal=True):
+                                    with dpg.group():
+                                        dpg.add_input_float(
+                                            label="Temp Min (C)",
+                                            default_value=app_state.render_temp_min,
+                                            callback=on_render_temp_min_change,
+                                            tag=app_state.render_temp_min_input_tag,
+                                            width=120,
+                                            format="%.2f",
+                                        )
+                                        dpg.add_input_float(
+                                            label="Temp Max (C)",
+                                            default_value=app_state.render_temp_max,
+                                            callback=on_render_temp_max_change,
+                                            tag=app_state.render_temp_max_input_tag,
+                                            width=120,
+                                            format="%.2f",
+                                        )
+                                    dpg.add_combo(
+                                        label="Colormap",
+                                        items=[
+                                            colormap.name for colormap in ColormapID
+                                        ],
+                                        default_value=app_state.render_colormap.name,
+                                        callback=on_render_colormap_change,
+                                        tag=app_state.render_colormap_combo_tag,
+                                        width=160,
+                                    )
 
                                 # Color picker display
                                 dpg.add_separator()
-                                dpg.add_text("Selected Color:")
+                                dpg.add_text("Selected Temperature:")
                                 with dpg.drawlist(
                                     width=60, height=30, tag="color_swatch_drawlist"
                                 ):
@@ -976,22 +984,23 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                         tag=app_state.color_swatch_tag,
                                     )
                                 dpg.add_text(
-                                    "No color selected", tag=app_state.color_text_tag
+                                    "No temperature selected",
+                                    tag=app_state.color_text_tag,
                                 )
 
                                 # Named areas controls
                                 dpg.add_separator()
-                                dpg.add_text("Named Areas:")
-                                dpg.add_button(
-                                    label="Create Area",
-                                    callback=on_mode_button_clicked,
-                                    user_data=app_state,
-                                    tag=app_state.mode_button_tag,
-                                )
-
-                                dpg.add_separator()
-                                dpg.add_text("Named Areas:")
-                                dpg.add_text("(Click 'Create Area' then drag on image)")
+                                with dpg.group(horizontal=True):
+                                    dpg.add_text("Named Areas:")
+                                    dpg.add_button(
+                                        label="Create Area",
+                                        callback=on_mode_button_clicked,
+                                        user_data=app_state,
+                                        tag=app_state.mode_button_tag,
+                                    )
+                                    dpg.add_text(
+                                        "(Click 'Create Area' then drag on image)"
+                                    )
                                 dpg.add_separator()
 
                                 # Areas list container

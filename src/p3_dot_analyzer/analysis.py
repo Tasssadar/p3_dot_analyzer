@@ -29,7 +29,7 @@ class DetectedMark:
 
 
 def detect_colored_marks(
-    image_bgr: np.ndarray,
+    image_rgba_dpg: np.ndarray,
     target_rgb: tuple[int, int, int],
     tolerance: int = 30,
     min_area: int = 200,
@@ -54,6 +54,12 @@ def detect_colored_marks(
     target_hsv = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2HSV)[0][0]
 
     # Convert image to HSV
+    # rgba: H x W x 4, float32 in [0,1]
+    # Convert RGBA -> BGR
+    image_bgr = cv2.cvtColor(
+        np.clip(image_rgba_dpg * 255.0, 0, 255).astype(np.uint8), cv2.COLOR_RGBA2BGR
+    )
+    # BGR -> HSV
     image_hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
 
     # Create color range with tolerance
@@ -245,7 +251,6 @@ def run_analysis(app_state: AppState) -> None:
     Args:
         app_state: The application state.
     """
-    return
     # Import here to avoid circular imports
     from .named_areas import update_areas_list
 
@@ -258,7 +263,7 @@ def run_analysis(app_state: AppState) -> None:
         update_areas_list(app_state)
         return
 
-    if app_state.selected_color is None:
+    if app_state.selected_temp is None:
         update_areas_list(app_state)
         return
 
@@ -267,9 +272,14 @@ def run_analysis(app_state: AppState) -> None:
         return
 
     # Detect marks
+    from .ui_helpers import color_for_temp
+
+    target_rgb = color_for_temp(app_state, app_state.selected_temp)
     marks = detect_colored_marks(
-        app_state.current_image_data,
-        app_state.selected_color,
+        app_state.current_frame.img.reshape(
+            (app_state.current_frame.height, app_state.current_frame.width, 4)
+        ),
+        target_rgb,
         tolerance=app_state.color_tolerance,
         min_area=app_state.min_area,
         min_circularity=app_state.min_circularity,
@@ -298,26 +308,33 @@ def clear_analysis_overlays(app_state: AppState) -> None:
 
 
 def _load_and_detect(
-    app_state: AppState, image_index: int, image_path: Path
-) -> tuple[int, list[DetectedMark] | None]:
+    app_state: AppState,
+    image_index: int,
+) -> tuple[int, float, list[DetectedMark] | None]:
+    assert app_state.recording_reader is not None
     # Load image
-    image_bgr = cv2.imread(str(image_path))
+    frame = app_state.recording_reader.read_frame(
+        image_index, app_state.build_render_config()
+    )
 
-    if image_bgr is None:
+    if frame is None:
         # If image fails to load, record zeros
-        return (image_index, None)
+        return (image_index, 0, None)
 
-    assert app_state.selected_color
+    assert app_state.selected_temp is not None
+    from .ui_helpers import color_for_temp
+
+    target_rgb = color_for_temp(app_state, app_state.selected_temp)
 
     # Detect marks
     marks = detect_colored_marks(
-        image_bgr,
-        app_state.selected_color,
+        frame.img.reshape((frame.height, frame.width, 4)),
+        target_rgb,
         tolerance=app_state.color_tolerance,
         min_area=app_state.min_area,
         min_circularity=app_state.min_circularity,
     )
-    return (image_index, marks)
+    return (image_index, frame.ts, marks)
 
 
 def run_batch_analysis(
@@ -336,14 +353,14 @@ def run_batch_analysis(
     from .models import BatchAnalysisResult, IMAGES_PER_SECOND
 
     # Check prerequisites
-    if app_state.selected_color is None:
+    if app_state.selected_temp is None:
         return
 
     if not app_state.named_areas:
         return
 
-    paths = app_state.repo.get_paths()
-    if not paths:
+    reader = app_state.recording_reader
+    if not reader or not reader.frame_count:
         return
 
     sampling_rate = max(1, min(100, app_state.batch_sampling_rate))
@@ -355,20 +372,20 @@ def run_batch_analysis(
     }
 
     # Get indices to process based on sampling
-    indices_to_process = list(range(0, len(paths), sampling_rate))
+    indices_to_process = list(range(0, reader.frame_count, sampling_rate))
     total = len(indices_to_process)
 
     last_progress_time = 0.0
 
     with ThreadPoolExecutor(max_workers=os.process_cpu_count()) as executor:
         futures = [
-            executor.submit(_load_and_detect, app_state, i, paths[i])
-            for i in indices_to_process
+            executor.submit(_load_and_detect, app_state, i) for i in indices_to_process
         ]
 
         progress_idx = 0
+        start_ts = reader.ts_start.timestamp()
         for fut in as_completed(futures):
-            image_index, marks = fut.result()
+            _image_index, timestamp, marks = fut.result()
             progress_idx += 1
 
             # Report progress
@@ -378,9 +395,7 @@ def run_batch_analysis(
                 if progress_callback is not None:
                     progress_callback(progress_idx, total)
 
-            # Calculate timestamp
-            timestamp = image_index / IMAGES_PER_SECOND
-            timestamps.append(timestamp)
+            timestamps.append(timestamp - start_ts)
 
             if marks is None:
                 for area_name in area_counts:
