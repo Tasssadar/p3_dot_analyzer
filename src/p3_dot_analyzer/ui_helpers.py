@@ -4,9 +4,11 @@ from collections.abc import Callable
 
 import dearpygui.dearpygui as dpg  # type: ignore
 
-from .camera import CamFrame
+from .camera import CamFrame, RENDER_SCALE
 from .models import AppState
 from datetime import datetime
+
+from p3_camera import raw_to_celsius
 
 
 def update_status(app_state: AppState, message: str) -> None:
@@ -51,7 +53,8 @@ def sample_color_at(
         return None
 
     # Bounds check
-    h, w = app_state.current_frame.img.shape[:2]
+    h = app_state.current_frame.height
+    w = app_state.current_frame.width
     if img_x < 0 or img_x >= w or img_y < 0 or img_y >= h:
         return None
 
@@ -59,6 +62,23 @@ def sample_color_at(
     bgr = app_state.current_frame.img[img_y, img_x]
     # Convert to RGB
     return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+
+def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
+    """Get the temperature at the given image coordinates."""
+    if app_state.current_frame is None:
+        return None
+
+    # Bounds check
+    h = app_state.current_frame.height
+    w = app_state.current_frame.width
+    if img_x < 0 or img_x >= w or img_y < 0 or img_y >= h:
+        return None
+
+    img_y = img_y // RENDER_SCALE
+    img_x = img_x // RENDER_SCALE
+
+    return raw_to_celsius(float(app_state.current_frame.raw_thermal[img_y, img_x]))  # type: ignore
 
 
 def update_color_display(app_state: AppState) -> None:

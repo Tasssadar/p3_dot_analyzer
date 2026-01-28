@@ -23,6 +23,7 @@ from .settings_io import (
 from .ui_helpers import (
     screen_to_image_coords,
     sample_color_at,
+    get_temp_at,
     update_color_display,
     update_status,
     render_frame,
@@ -138,6 +139,19 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     # Run analysis if analysis mode is enabled
                     if app_state.analysis_mode_enabled:
                         run_analysis(app_state)
+
+    def on_mouse_move(sender: int, app_data: tuple[float, float]) -> None:
+        if not dpg.is_item_hovered(app_state.image_drawlist_tag):
+            dpg.set_value(app_state.hover_temp_text_tag, "Temp: --")
+            return
+
+        mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
+        img_x, img_y = screen_to_image_coords(app_state, mouse_x, mouse_y)
+        temp = get_temp_at(app_state, img_x, img_y)
+        if temp is None:
+            dpg.set_value(app_state.hover_temp_text_tag, "Temp: --")
+        else:
+            dpg.set_value(app_state.hover_temp_text_tag, f"Temp: {temp:.2f} C")
 
     def on_mouse_down(sender: int, app_data: None) -> None:
         """Handle mouse down for starting area creation drag."""
@@ -895,6 +909,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                         pmax=(1, 1),  # updated on render
                                         tag=app_state.image_draw_tag,
                                     )
+                                dpg.add_text(
+                                    "Temp: --",
+                                    tag=app_state.hover_temp_text_tag,
+                                )
 
                             # Right side: controls
                             with dpg.group():
@@ -1056,6 +1074,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     # Global mouse handlers for color picking and area creation
     with dpg.handler_registry():
         dpg.add_mouse_click_handler(callback=on_mouse_click)
+        dpg.add_mouse_move_handler(callback=on_mouse_move)
         dpg.add_mouse_down_handler(
             button=dpg.mvMouseButton_Left, callback=on_mouse_down
         )

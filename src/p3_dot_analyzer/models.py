@@ -73,6 +73,7 @@ class AppState:
     selected_color: tuple[int, int, int] | None = (163, 163, 163)
     color_swatch_tag: str = "color_swatch"
     color_text_tag: str = "color_text"
+    hover_temp_text_tag: str = "hover_temp_text"
     # Named areas state
     named_areas: list[NamedArea] = field(default_factory=list)
     interaction_mode: str = "view"  # "view" or "create_area"
