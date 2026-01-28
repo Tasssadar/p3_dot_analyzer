@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+import time
+
+import cv2
+import numpy as np
+
+from ..models import BatchAnalysisResult, NamedArea
+from ..state import AppState
+from ..ui_helpers import color_for_temp
+
+
+@dataclass
+class DetectedMark:
+    """A detected circular or elliptical mark."""
+
+    center_x: float
+    center_y: float
+    axis_a: float  # semi-major axis
+    axis_b: float  # semi-minor axis
+    angle: float  # rotation angle in degrees
+
+
+def detect_colored_marks(
+    image_rgba_dpg: np.ndarray,
+    target_rgb: tuple[int, int, int],
+    tolerance: int = 30,
+    min_area: int = 200,
+    min_circularity: float = 0.5,
+) -> list[DetectedMark]:
+    """Detect circular/elliptical marks of a specific color in the image.
+
+    Args:
+        image_bgr: Image in BGR format (as loaded by OpenCV).
+        target_rgb: Target color in RGB format.
+        tolerance: Tolerance for color matching in HSV space.
+        min_area: Minimum contour area to consider.
+        min_circularity: Minimum circularity threshold (0-1, circle=1).
+
+    Returns:
+        List of detected marks with their positions and dimensions.
+    """
+    # Convert target RGB to BGR then to HSV
+    target_bgr = np.array(
+        [[[target_rgb[2], target_rgb[1], target_rgb[0]]]], dtype=np.uint8
+    )
+    target_hsv = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2HSV)[0][0]
+
+    # Convert image to HSV
+    # rgba: H x W x 4, float32 in [0,1]
+    # Convert RGBA -> BGR
+    image_bgr = cv2.cvtColor(
+        np.clip(image_rgba_dpg * 255.0, 0, 255).astype(np.uint8), cv2.COLOR_RGBA2BGR
+    )
+    # BGR -> HSV
+    image_hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+
+    # Create color range with tolerance
+    h, s, v = target_hsv
+    # Hue wraps around at 180, so handle that specially
+    h_tolerance = min(tolerance // 2, 20)  # Hue is 0-179 in OpenCV
+    s_tolerance = tolerance
+    v_tolerance = tolerance
+
+    lower_bound = np.array(
+        [
+            max(0, int(h) - h_tolerance),
+            max(0, int(s) - s_tolerance),
+            max(0, int(v) - v_tolerance),
+        ]
+    )
+    upper_bound = np.array(
+        [
+            min(179, int(h) + h_tolerance),
+            min(255, int(s) + s_tolerance),
+            min(255, int(v) + v_tolerance),
+        ]
+    )
+
+    # Create mask for the target color
+    mask = cv2.inRange(image_hsv, lower_bound, upper_bound)
+
+    # Handle hue wrap-around for red colors (hue near 0 or 180)
+    if h < h_tolerance:
+        # Also include high hue values
+        lower2 = np.array(
+            [
+                180 - (h_tolerance - int(h)),
+                max(0, int(s) - s_tolerance),
+                max(0, int(v) - v_tolerance),
+            ],
+            dtype=np.int64,
+        )
+        upper2 = np.array(
+            [179, min(255, s + s_tolerance), min(255, v + v_tolerance)],
+            dtype=np.int64,
+        )
+        mask2 = cv2.inRange(image_hsv, lower2, upper2)
+        mask = cv2.bitwise_or(mask, mask2)
+    elif h > 179 - h_tolerance:
+        # Also include low hue values
+        lower2 = np.array([0, max(0, s - s_tolerance), max(0, v - v_tolerance)])
+        upper2 = np.array(
+            [
+                h_tolerance - (179 - h),
+                min(255, s + s_tolerance),
+                min(255, v + v_tolerance),
+            ]
+        )
+        mask2 = cv2.inRange(image_hsv, lower2, upper2)
+        mask = cv2.bitwise_or(mask, mask2)
+
+    # Morphological operations to clean up noise
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    detected_marks: list[DetectedMark] = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter == 0:
+            continue
+
+        # Calculate circularity: 4 * pi * area / perimeter^2
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+
+        if circularity < min_circularity:
+            continue
+
+        # Need at least 5 points to fit an ellipse
+        if len(contour) >= 5:
+            ellipse = cv2.fitEllipse(contour)
+            center, axes, angle = ellipse
+            detected_marks.append(
+                DetectedMark(
+                    center_x=center[0],
+                    center_y=center[1],
+                    axis_a=axes[0]
+                    / 2,  # fitEllipse returns full axes, we want semi-axes
+                    axis_b=axes[1] / 2,
+                    angle=angle,
+                )
+            )
+        else:
+            # Fall back to minimum enclosing circle
+            (cx, cy), radius = cv2.minEnclosingCircle(contour)
+            detected_marks.append(
+                DetectedMark(
+                    center_x=cx,
+                    center_y=cy,
+                    axis_a=radius,
+                    axis_b=radius,
+                    angle=0,
+                )
+            )
+
+    return detected_marks
+
+
+def count_marks_in_areas(
+    marks: list[DetectedMark],
+    named_areas: list[NamedArea],
+) -> dict[str, int]:
+    """Count how many marks overlap with each named area."""
+    counts: dict[str, int] = {}
+
+    for area in named_areas:
+        count = 0
+        area_x1 = area.x
+        area_y1 = area.y
+        area_x2 = area.x + area.width
+        area_y2 = area.y + area.height
+
+        for mark in marks:
+            # Check if mark center is within the area bounds
+            if (
+                area_x1 <= mark.center_x <= area_x2
+                and area_y1 <= mark.center_y <= area_y2
+            ):
+                count += 1
+
+        counts[area.name] = count
+
+    return counts
+
+
+def analyze_current_frame(
+    app_state: AppState,
+) -> tuple[list[DetectedMark], dict[str, int]] | None:
+    if not app_state.analysis.enabled:
+        return None
+    if app_state.analysis.selected_temp is None:
+        return None
+    if app_state.render.current_frame is None:
+        return None
+
+    target_rgb = color_for_temp(app_state, app_state.analysis.selected_temp)
+    marks = detect_colored_marks(
+        app_state.render.current_frame.img.reshape(
+            (
+                app_state.render.current_frame.height,
+                app_state.render.current_frame.width,
+                4,
+            )
+        ),
+        target_rgb,
+        tolerance=app_state.analysis.color_tolerance,
+        min_area=app_state.analysis.min_area,
+        min_circularity=app_state.analysis.min_circularity,
+    )
+    counts = count_marks_in_areas(marks, app_state.areas.named_areas)
+    return marks, counts
+
+
+def _load_and_detect(
+    app_state: AppState,
+    image_index: int,
+) -> tuple[int, float, list[DetectedMark] | None]:
+    assert app_state.recording.reader is not None
+    # Load image
+    frame = app_state.recording.reader.read_frame(
+        image_index, app_state.build_render_config()
+    )
+
+    if frame is None:
+        # If image fails to load, record zeros
+        return (image_index, 0, None)
+
+    assert app_state.analysis.selected_temp is not None
+    target_rgb = color_for_temp(app_state, app_state.analysis.selected_temp)
+
+    # Detect marks
+    marks = detect_colored_marks(
+        frame.img.reshape((frame.height, frame.width, 4)),
+        target_rgb,
+        tolerance=app_state.analysis.color_tolerance,
+        min_area=app_state.analysis.min_area,
+        min_circularity=app_state.analysis.min_circularity,
+    )
+    return (image_index, frame.ts, marks)
+
+
+def run_batch_analysis(
+    app_state: AppState,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> None:
+    """Run batch analysis on all images with sampling."""
+    # Check prerequisites
+    if app_state.analysis.selected_temp is None:
+        return
+
+    if not app_state.areas.named_areas:
+        return
+
+    reader = app_state.recording.reader
+    if not reader or not reader.frame_count:
+        return
+
+    sampling_rate = max(1, min(100, app_state.analysis.batch_sampling_rate))
+
+    # Initialize result storage
+    timestamps: list[float] = []
+    area_counts: dict[str, list[int]] = {
+        area.name: [] for area in app_state.areas.named_areas
+    }
+
+    # Get indices to process based on sampling
+    indices_to_process = list(range(0, reader.frame_count, sampling_rate))
+    total = len(indices_to_process)
+
+    last_progress_time = 0.0
+
+    with ThreadPoolExecutor(max_workers=os.process_cpu_count()) as executor:
+        futures = [
+            executor.submit(_load_and_detect, app_state, i) for i in indices_to_process
+        ]
+
+        progress_idx = 0
+        start_ts = reader.ts_start.timestamp()
+        for fut in as_completed(futures):
+            _image_index, timestamp, marks = fut.result()
+            progress_idx += 1
+
+            # Report progress
+            now = time.monotonic()
+            if now - last_progress_time > 0.3:
+                last_progress_time = now
+                if progress_callback is not None:
+                    progress_callback(progress_idx, total)
+
+            timestamps.append(timestamp - start_ts)
+
+            if marks is None:
+                for area_name in area_counts:
+                    area_counts[area_name].append(0)
+                continue
+
+            # Count marks in areas
+            counts = count_marks_in_areas(marks, app_state.areas.named_areas)
+
+            # Store counts for each area
+            for area in app_state.areas.named_areas:
+                area_counts[area.name].append(counts.get(area.name, 0))
+
+    # Store result
+    app_state.analysis.batch_result = BatchAnalysisResult(
+        timestamps=timestamps,
+        area_counts=area_counts,
+    )
