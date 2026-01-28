@@ -95,7 +95,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     """Create Dear PyGui windows and widgets."""
 
     def on_mode_button_clicked(
-        sender: int, app_data: None, user_data: AppState
+        _sender: int, _app_data: None, user_data: AppState
     ) -> None:
         """Toggle between view mode and create_area mode."""
         if user_data.interaction_mode == "view":
@@ -117,7 +117,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             if dpg.does_item_exist(user_data.preview_rect_tag):
                 dpg.delete_item(user_data.preview_rect_tag)
 
-    def on_mouse_click(sender: int, app_data: None) -> None:
+    def on_mouse_click(_sender: int, _app_data: None) -> None:
         # Global mouse click handler for color picking and area creation
         if not dpg.is_item_hovered(app_state.image_drawlist_tag):
             return
@@ -141,7 +141,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     if app_state.analysis_mode_enabled:
                         run_analysis(app_state)
 
-    def on_mouse_move(sender: int, app_data: tuple[float, float]) -> None:
+    def on_mouse_move(_sender: int, _app_data: tuple[float, float]) -> None:
         if not dpg.is_item_hovered(app_state.image_drawlist_tag):
             dpg.set_value(app_state.hover_temp_text_tag, "Temp: --")
             return
@@ -154,7 +154,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         else:
             dpg.set_value(app_state.hover_temp_text_tag, f"Temp: {temp:.2f} C")
 
-    def on_mouse_down(sender: int, app_data: None) -> None:
+    def on_mouse_down(_sender: int, _app_data: None) -> None:
         """Handle mouse down for starting area creation drag."""
         if app_state.interaction_mode != "create_area":
             return
@@ -170,7 +170,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             app_state, f"Drag started at ({local_coords[0]:.0f}, {local_coords[1]:.0f})"
         )
 
-    def on_mouse_drag(sender: int, app_data: tuple[float, float, float]) -> None:
+    def on_mouse_drag(_sender: int, _app_data: tuple[float, float, float]) -> None:
         """Handle mouse drag for preview rectangle."""
         if app_state.interaction_mode != "create_area":
             return
@@ -206,7 +206,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 parent=app_state.image_drawlist_tag,
             )
 
-    def on_mouse_release(sender: int, app_data: None) -> None:
+    def on_mouse_release(_sender: int, _app_data: None) -> None:
         """Handle mouse release for finalizing area creation."""
         if app_state.interaction_mode != "create_area":
             return
@@ -247,7 +247,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
 
         app_state.drag_start = None
 
-    def on_analysis_toggle(sender: int, app_data: bool) -> None:
+    def on_analysis_toggle(_sender: int, app_data: bool) -> None:
         """Handle analysis mode checkbox toggle."""
         app_state.analysis_mode_enabled = app_data
         schedule_settings_save(app_state)
@@ -269,25 +269,25 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             update_status(app_state, "Analysis mode disabled")
             run_analysis(app_state)  # This will clear overlays
 
-    def on_tolerance_change(sender: int, app_data: int) -> None:
+    def on_tolerance_change(_sender: int, app_data: int) -> None:
         """Handle tolerance input change."""
         app_state.color_tolerance = max(1, min(100, int(app_data)))
         schedule_settings_save(app_state)
         run_analysis(app_state)
 
-    def on_min_area_change(sender: int, app_data: int) -> None:
+    def on_min_area_change(_sender: int, app_data: int) -> None:
         """Handle min area input change."""
         app_state.min_area = max(10, min(5000, int(app_data)))
         schedule_settings_save(app_state)
         run_analysis(app_state)
 
-    def on_min_circularity_change(sender: int, app_data: float) -> None:
+    def on_min_circularity_change(_sender: int, app_data: float) -> None:
         """Handle min circularity input change."""
         app_state.min_circularity = max(0.0, min(1.0, float(app_data)))
         schedule_settings_save(app_state)
         run_analysis(app_state)
 
-    def on_sampling_rate_change(sender: int, app_data: int) -> None:
+    def on_sampling_rate_change(_sender: int, app_data: int) -> None:
         """Handle sampling rate input change."""
         app_state.batch_sampling_rate = max(1, min(100, app_data))
         schedule_settings_save(app_state)
@@ -406,7 +406,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         else:
             rerender_current_frame()
 
-    def on_render_temp_min_change(sender: int, app_data: float) -> None:
+    def on_render_temp_min_change(_sender: int, app_data: float) -> None:
         app_state.render_temp_min = float(app_data)
         normalize_render_range()
         schedule_settings_save(app_state)
@@ -415,7 +415,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         if app_state.analysis_mode_enabled:
             run_analysis(app_state)
 
-    def on_render_temp_max_change(sender: int, app_data: float) -> None:
+    def on_render_temp_max_change(_sender: int, app_data: float) -> None:
         app_state.render_temp_max = float(app_data)
         normalize_render_range()
         schedule_settings_save(app_state)
@@ -424,7 +424,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         if app_state.analysis_mode_enabled:
             run_analysis(app_state)
 
-    def on_render_colormap_change(sender: int, app_data: str) -> None:
+    def on_render_colormap_change(_sender: int, app_data: str) -> None:
         mapping = {colormap.name: colormap for colormap in ColormapID}
         if app_data in mapping:
             app_state.render_colormap = mapping[app_data]
@@ -434,14 +434,14 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             if app_state.analysis_mode_enabled:
                 run_analysis(app_state)
 
-    def on_recording_frame_change(sender: int, app_data: int) -> None:
+    def on_recording_frame_change(_sender: int, app_data: int) -> None:
         render_recording_frame(int(app_data))
 
-    def on_recording_frame_period_change(sender: int, app_data: int) -> None:
+    def on_recording_frame_period_change(_sender: int, app_data: int) -> None:
         """Handle recording frame period input change."""
         app_state.recording_frame_period_ms = max(1, min(10000, int(app_data)))
 
-    def on_batch_analyze_clicked(sender: int, app_data: None) -> None:
+    def on_batch_analyze_clicked(_sender: int, _app_data: None) -> None:
         """Handle batch analysis button click."""
         # Validate prerequisites
         if app_state.selected_temp is None:
@@ -501,7 +501,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         for rec_path in recordings:
             is_selected = app_state.selected_recording_path == rec_path
 
-            def on_select(sender: int, app_data: bool, user_data: Path) -> None:
+            def on_select(_sender: int, app_data: bool, user_data: Path) -> None:
                 if not app_data:
                     return
                 app_state.selected_recording_path = user_data
@@ -523,7 +523,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     )
 
                 def on_rename_clicked(
-                    sender: int, app_data: None, user_data: Path
+                    _sender: int, _app_data: None, user_data: Path
                 ) -> None:
                     if (
                         app_state.recording_active
@@ -534,7 +534,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                     show_rename_modal(user_data)
 
                 def on_delete_clicked(
-                    sender: int, app_data: None, user_data: Path
+                    _sender: int, _app_data: None, user_data: Path
                 ) -> None:
                     if (
                         app_state.recording_active
@@ -573,7 +573,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         if dpg.does_item_exist(app_state.rename_modal_tag):
             dpg.delete_item(app_state.rename_modal_tag)
 
-        def on_confirm(sender: int, app_data: None) -> None:
+        def on_confirm(_sender: int, _app_data: None) -> None:
             new_name = dpg.get_value(app_state.rename_input_tag).strip()
             if not new_name:
                 update_status(app_state, "Recording name cannot be empty.")
@@ -602,7 +602,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             dpg.delete_item(app_state.rename_modal_tag)
             refresh_recordings_list()
 
-        def on_cancel(sender: int, app_data: None) -> None:
+        def on_cancel(_sender: int, _app_data: None) -> None:
             dpg.delete_item(app_state.rename_modal_tag)
 
         with dpg.window(
@@ -722,7 +722,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 dpg.add_separator()
                 dpg.add_text("", tag=app_state.timestamp_text_tag)
 
-                def on_tab_change(sender: int, app_data: int, user_data: str) -> None:
+                def on_tab_change(_sender: int, app_data: int, _user_data: str) -> None:
                     # No idea what the ID is
                     app_state.active_tab = (
                         "recording_tab" if app_data == 41 else "analysis_tab"
@@ -765,7 +765,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                 )
 
                                 def on_start_recording(
-                                    sender: int, app_data: None
+                                    _sender: int, _app_data: None
                                 ) -> None:
                                     if not app_state.camera_connected:
                                         update_status(
@@ -811,7 +811,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     )
 
                                 def on_pause_recording(
-                                    sender: int, app_data: None
+                                    _sender: int, _app_data: None
                                 ) -> None:
                                     if not app_state.recording_active:
                                         update_status(
@@ -843,7 +843,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     )
 
                                 def on_stop_recording(
-                                    sender: int, app_data: None
+                                    _sender: int, _app_data: None
                                 ) -> None:
                                     if not app_state.recording_active:
                                         update_status(
@@ -1112,7 +1112,6 @@ def run() -> None:
         image_drawlist_tag="image_drawlist",
         image_draw_tag="image_draw",
         slider_tag="image_slider",
-        filename_text_tag="filename_text",
         status_text_tag="status_text",
         settings_path=settings_path,
     )

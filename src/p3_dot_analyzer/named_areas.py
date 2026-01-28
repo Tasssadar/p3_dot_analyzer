@@ -73,7 +73,7 @@ def update_areas_list(app_state: AppState) -> None:
                 dpg.add_text(f"{area.name}")
 
                 def make_delete_callback(index: int) -> Callable[[int, None], None]:
-                    def delete_area(sender: int, app_data: None) -> None:
+                    def delete_area(_sender: int, _app_data: None) -> None:
                         # Import here to avoid circular imports
                         from .analysis import run_analysis
 
@@ -122,7 +122,7 @@ def show_area_name_popup(
     if dpg.does_item_exist(popup_tag):
         dpg.delete_item(popup_tag)
 
-    def on_confirm(sender: int, app_data: None) -> None:
+    def on_confirm(_sender: int, _app_data: None) -> None:
         # Import here to avoid circular imports
         from .analysis import run_analysis
 
@@ -155,7 +155,7 @@ def show_area_name_popup(
         # Close popup
         dpg.delete_item(popup_tag)
 
-    def on_cancel(sender: int, app_data: None) -> None:
+    def on_cancel(_sender: int, _app_data: None) -> None:
         app_state.interaction_mode = "view"
         dpg.configure_item(app_state.mode_button_tag, label="Create Area")
         dpg.delete_item(popup_tag)

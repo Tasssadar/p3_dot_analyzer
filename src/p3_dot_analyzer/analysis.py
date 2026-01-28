@@ -9,7 +9,6 @@ import time
 import cv2
 import dearpygui.dearpygui as dpg  # type: ignore
 import numpy as np
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
@@ -350,7 +349,7 @@ def run_batch_analysis(
         app_state: The application state.
         progress_callback: Optional callback(current, total) for progress updates.
     """
-    from .models import BatchAnalysisResult, IMAGES_PER_SECOND
+    from .models import BatchAnalysisResult
 
     # Check prerequisites
     if app_state.selected_temp is None:

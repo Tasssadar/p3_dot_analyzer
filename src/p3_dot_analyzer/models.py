@@ -9,8 +9,6 @@ from p3_viewer import ColormapID  # type: ignore
 from .camera import CamFrame, RecordingReader
 from .render import RenderConfig
 
-IMAGES_PER_SECOND = 25
-
 
 @dataclass(slots=True)
 class NamedArea:
@@ -49,7 +47,7 @@ class SettingsData(TypedDict, total=False):
 class BatchAnalysisResult:
     """Results from batch analysis of all images."""
 
-    timestamps: list[float]  # image_index / IMAGES_PER_SECOND
+    timestamps: list[float]  # seconds since start
     area_counts: dict[str, list[int]]  # area_name -> counts at each timestamp
 
 
@@ -60,7 +58,6 @@ class AppState:
     image_drawlist_tag: str
     image_draw_tag: str
     slider_tag: str
-    filename_text_tag: str
     status_text_tag: str
     timestamp_text_tag: str = "timestamp_text"
     current_frame: CamFrame | None = None
