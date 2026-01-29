@@ -3,6 +3,7 @@ name: Package exe with PyInstaller - Windows
 on:
   push:
     branches: [ master ]
+    tags: [ v* ]
 
 jobs:
   build:
@@ -26,3 +27,9 @@ jobs:
       with:
         name: p3_dot_analyzer.exe
         path: dist/p3_dot_analyzer_cli.exe
+    
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      if: github.ref_type == 'tag'
+      with:
+          files: dist/p3_dot_analyzer_cli.exe
