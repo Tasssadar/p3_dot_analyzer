@@ -25,7 +25,7 @@ def build_named_areas_controls(
     # Areas list container
     with dpg.child_window(
         tag=state.areas.areas_list_tag,
-        height=250,
+        height=150,
         border=True,
     ):
         dpg.add_text("No areas defined")

@@ -1,4 +1,4 @@
-from p3_camera import P3Camera  # type: ignore
+from p3_camera import P3Camera, extract_thermal_data  # type: ignore
 from p3_viewer import ColormapID  # type: ignore
 from dataclasses import dataclass, field
 import queue
@@ -255,7 +255,11 @@ class Camera:
                 last_thermal: NDArray[np.uint16] | None = None
 
                 while not self._ev_stop_thread.is_set():
-                    _ir_brightness, thermal_raw = self._p3.read_frame_both()
+                    raw_frame = self._p3.read_frame()
+                    if raw_frame is None:
+                        continue
+
+                    thermal_raw = extract_thermal_data(raw_frame, self._p3.config)
                     if thermal_raw is None:
                         continue
 

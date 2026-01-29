@@ -42,7 +42,7 @@ class RenderState:
     current_frame: CamFrame | None = None
     temp_min: float = DEFAULT_RENDER_TEMP_MIN
     temp_max: float = DEFAULT_RENDER_TEMP_MAX
-    colormap: ColormapID = ColormapID.WHITE_HOT
+    colormap: ColormapID = ColormapID.RAINBOW
     emissivity: float = DEFAULT_RENDER_EMISSIVITY
     reflected_temp: float = DEFAULT_RENDER_REFLECTED_TEMP
     temp_min_input_tag: str = "render_temp_min_input"
