@@ -1,69 +1,39 @@
-# P3 Camera Tecky
+# P3 Dot Analyzer
 
-Malá desktopová aplikace pro kontrolu sekvence obrázků a detekci značek ve vymezených oblastech. Je určená pro práci se snímky vytaženými z videa.
+Krátký návod k použití aplikace s P3 IR kamerou.
 
-## Požadavky
+## Stažení a spuštění
 
-- Windows 10/11
-- `uv` (nástroj používaný pro instalaci a spuštění aplikace)
+1. Stáhněte `p3_dot_analyzer_cli.exe` z nejnovějšího release:
+   https://github.com/Tasssadar/p3_dot_analyzer/releases
+2. Připojte P3 infra kameru přes USB.
+3. Spusťte `p3_dot_analyzer_cli.exe`.
+   - Windows SmartScreen může varovat, protože .exe není podepsané.
+4. Po pár sekundách by se měl objevit obraz z IR kamery.
 
-## Instalace `uv` (Windows PowerShell)
+## Pracovní postup
 
-Z [původní dokumentace](https://docs.astral.sh/uv/getting-started/installation/):
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-## Kam umístit obrázky a video
-
-- Uložte vytažené obrázky do `imgs/` v kořeni repo (`.png`, `.jpg`, `.jpeg`, `.bmp`).
-- Zdrojové video uložte do kořene repo pod názvem uvedeným v `split.ps1`.
-- Volitelné: spusťte `split.ps1` pro vytvoření `imgs/` z videa.
-
-## Nastavení a spuštění
-
-```powershell
-uv sync
-uv run p3-dot-analyzer
-```
-
-## Pokud vidíte „No images found“
-
-- Zkontrolujte, že `imgs/` existuje a obsahuje podporované formáty obrázků.
+1. **Record tab**: nahrajte experiment pomocí tlačítek Start/Stop.
+2. **Analysis tab**: vyberte nahrávku vlevo a dolaďte parametry,
+   dokud nejsou výsledky uspokojivé.
 
 ---
 
-# P3 Camera Tecky
+# P3 Dot Analyzer
 
-Small desktop app to review a sequence of images and detect marks in defined areas. It is built for working with frames extracted from a video.
+Quick guide to use the app with a P3 IR camera.
 
-## Requirements
+## Download and launch
 
-- Windows 10/11
-- `uv` (the tool used to install and run the app)
+1. Download `p3_dot_analyzer_cli.exe` from the latest release:
+   https://github.com/Tasssadar/p3_dot_analyzer/releases
+2. Connect the P3 infrared camera via USB.
+3. Start `p3_dot_analyzer_cli.exe`.
+   - Windows SmartScreen may appear because the .exe is unsigned.
+4. After a few seconds, the IR camera image should appear.
 
-## Install `uv` (Windows PowerShell)
+## Workflow
 
-From [original documentation](https://docs.astral.sh/uv/getting-started/installation/):
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-## Where to place images and video
-
-- Put extracted images in `imgs/` at the repo root (`.png`, `.jpg`, `.jpeg`, `.bmp`).
-- Put the source video in the repo root with the name referenced in `split.ps1`.
-- Optional: run `split.ps1` to create `imgs/` from the video.
-
-## Setup and run
-
-```powershell
-uv sync
-uv run p3-dot-analyzer
-```
-
-## If you see “No images found”
-
-- Check that `imgs/` exists and contains supported image files.
+1. **Record tab**: record the experiment using Start/Stop.
+2. **Analysis tab**: click the recording on the left and tweak parameters
+   until the results look good.
