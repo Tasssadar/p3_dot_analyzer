@@ -8,8 +8,8 @@ from .camera import CamFrame, RENDER_SCALE
 from .state import AppState
 from datetime import datetime
 
-from p3_camera import EnvParams, raw_to_celsius_corrected
-from p3_viewer import get_colormap
+from p3_camera import EnvParams, raw_to_celsius_corrected  # type: ignore[import-untyped]
+from p3_viewer import get_colormap  # type: ignore[import-untyped]
 
 
 def update_status(app_state: AppState, message: str) -> None:

@@ -1,9 +1,8 @@
-from p3_viewer import apply_colormap, ColormapID
+from p3_viewer import apply_colormap, ColormapID  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 import numpy as np
 import cv2
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(slots=True)
