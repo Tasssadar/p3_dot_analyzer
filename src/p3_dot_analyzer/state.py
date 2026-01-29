@@ -34,7 +34,7 @@ class UiState:
     hover_temp_text_tag: str = "hover_temp_text"
     color_swatch_tag: str = "color_swatch"
     color_text_tag: str = "color_text"
-    active_tab: str = "analysis_tab"
+    active_tab: str = "recording_tab"
 
 
 @dataclass(slots=True)
