@@ -1,0 +1,28 @@
+name: Package exe with PyInstaller - Windows
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: windows-2022
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: "Set up Python"
+      uses: actions/setup-python@v6
+      with:
+        python-version-file: ".python-version"
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+
+    - run: uv sync
+  
+    - run: Powershell.exe -File build_exe.ps1
+
+    - uses: actions/upload-artifact@v6
+      with:
+        name: p3_dot_analyzer.exe
+        path: dist/p3_dot_analyzer_cli.exe
