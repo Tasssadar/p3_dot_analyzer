@@ -60,10 +60,13 @@ def render(
     Renders raw thermal data to a texture for display in DearPyGUI.
     """
     img = _agc_fixed(config, thermal)
+
+    # Cant use CLAHE - it changes colors, so they no longer match the temperature
     # Optional CLAHE for local contrast enhancement
-    clahe_result: Any = _clahe.apply(img)
+    # clahe_result: Any = _clahe.apply(img)
     # Ensure result is a numpy array (CLAHE may return cv2.UMat on some platforms)
-    img = np.asarray(clahe_result, dtype=np.uint8)
+    # img = np.asarray(clahe_result, dtype=np.uint8)
+
     # DDE: edge enhancement
     img = _dde(img)
     img = apply_colormap(img, config.colormap)
