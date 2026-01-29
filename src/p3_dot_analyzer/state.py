@@ -14,6 +14,8 @@ from .constants import (
     DEFAULT_MIN_CIRCULARITY,
     DEFAULT_RENDER_TEMP_MAX,
     DEFAULT_RENDER_TEMP_MIN,
+    DEFAULT_RENDER_EMISSIVITY,
+    DEFAULT_RENDER_REFLECTED_TEMP,
     DEFAULT_RECORDING_FRAME_PERIOD_MS,
     DEFAULT_ANALYSIS_ENABLED,
 )
@@ -41,9 +43,13 @@ class RenderState:
     temp_min: float = DEFAULT_RENDER_TEMP_MIN
     temp_max: float = DEFAULT_RENDER_TEMP_MAX
     colormap: ColormapID = ColormapID.WHITE_HOT
+    emissivity: float = DEFAULT_RENDER_EMISSIVITY
+    reflected_temp: float = DEFAULT_RENDER_REFLECTED_TEMP
     temp_min_input_tag: str = "render_temp_min_input"
     temp_max_input_tag: str = "render_temp_max_input"
     colormap_combo_tag: str = "render_colormap_combo"
+    emissivity_input_tag: str = "render_emissivity_input"
+    reflected_temp_input_tag: str = "render_reflected_temp_input"
 
 
 @dataclass(slots=True)

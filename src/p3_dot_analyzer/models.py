@@ -35,6 +35,8 @@ class SettingsData(TypedDict, total=False):
     render_temp_min: float
     render_temp_max: float
     render_colormap: str
+    render_emissivity: float
+    render_reflected_temp: float
 
 
 @dataclass(slots=True)

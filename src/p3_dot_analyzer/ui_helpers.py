@@ -8,7 +8,7 @@ from .camera import CamFrame, RENDER_SCALE
 from .state import AppState
 from datetime import datetime
 
-from p3_camera import raw_to_celsius
+from p3_camera import EnvParams, raw_to_celsius_corrected
 from p3_viewer import get_colormap
 
 
@@ -63,8 +63,15 @@ def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
     img_y = img_y // RENDER_SCALE
     img_x = img_x // RENDER_SCALE
 
+    env = EnvParams(
+        emissivity=app_state.render.emissivity,
+        reflected_temp=app_state.render.reflected_temp,
+    )
     return float(
-        raw_to_celsius(float(app_state.render.current_frame.raw_thermal[img_y, img_x]))
+        raw_to_celsius_corrected(
+            float(app_state.render.current_frame.raw_thermal[img_y, img_x]),
+            env,
+        )
     )
 
 

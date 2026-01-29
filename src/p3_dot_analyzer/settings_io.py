@@ -122,6 +122,16 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
             if name in mapping:
                 app_state.render.colormap = mapping[name]
 
+    if "render_emissivity" in settings:
+        emissivity = _clamp_float(settings["render_emissivity"], 0.0, 1.0)
+        if emissivity is not None:
+            app_state.render.emissivity = emissivity
+
+    if "render_reflected_temp" in settings:
+        reflected_temp = _clamp_float(settings["render_reflected_temp"], -100.0, 1000.0)
+        if reflected_temp is not None:
+            app_state.render.reflected_temp = reflected_temp
+
     _normalize_render_range(app_state)
 
 
@@ -147,6 +157,8 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         "render_temp_min": app_state.render.temp_min,
         "render_temp_max": app_state.render.temp_max,
         "render_colormap": app_state.render.colormap.name,
+        "render_emissivity": app_state.render.emissivity,
+        "render_reflected_temp": app_state.render.reflected_temp,
     }
 
 

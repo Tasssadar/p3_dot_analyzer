@@ -177,6 +177,14 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             if app_state.analysis.enabled:
                 on_areas_changed(app_state)
 
+    def on_render_emissivity_change(_sender: int, app_data: float) -> None:
+        app_state.render.emissivity = max(0.0, min(1.0, float(app_data)))
+        schedule_settings_save(app_state)
+
+    def on_render_reflected_temp_change(_sender: int, app_data: float) -> None:
+        app_state.render.reflected_temp = max(-100.0, min(1000.0, float(app_data)))
+        schedule_settings_save(app_state)
+
     def on_recording_frame_change(_sender: int, app_data: int) -> None:
         render_recording_frame(app_state, int(app_data), on_image_loaded)
 
@@ -284,28 +292,6 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     "Temp: --",
                                     tag=app_state.ui.hover_temp_text_tag,
                                 )
-
-                            # Right side: controls
-                            with dpg.group():
-                                dpg.add_separator()
-                                dpg.add_text("Playback")
-                                dpg.add_slider_int(
-                                    label="Frame",
-                                    tag=app_state.recording.slider_tag,
-                                    default_value=app_state.recording.frame_index,
-                                    min_value=0,
-                                    max_value=max(
-                                        0, app_state.recording.frame_count - 1
-                                    ),
-                                    callback=on_recording_frame_change,
-                                    width=220,
-                                    enabled=app_state.recording.reader is not None,
-                                )
-                                dpg.add_text(
-                                    "No recording loaded",
-                                    tag=app_state.recording.frame_text_tag,
-                                )
-
                                 dpg.add_separator()
                                 dpg.add_text("Render Config")
                                 with dpg.group(horizontal=True):
@@ -336,6 +322,44 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                         tag=app_state.render.colormap_combo_tag,
                                         width=160,
                                     )
+                                with dpg.group(horizontal=True):
+                                    dpg.add_input_float(
+                                        label="Emissivity",
+                                        default_value=app_state.render.emissivity,
+                                        callback=on_render_emissivity_change,
+                                        tag=app_state.render.emissivity_input_tag,
+                                        width=120,
+                                        format="%.3f",
+                                    )
+                                    dpg.add_input_float(
+                                        label="Reflected (ambient) Temp (C)",
+                                        default_value=app_state.render.reflected_temp,
+                                        callback=on_render_reflected_temp_change,
+                                        tag=app_state.render.reflected_temp_input_tag,
+                                        width=140,
+                                        format="%.2f",
+                                    )
+
+                            # Right side: controls
+                            with dpg.group():
+                                dpg.add_separator()
+                                dpg.add_text("Playback")
+                                dpg.add_slider_int(
+                                    label="Frame",
+                                    tag=app_state.recording.slider_tag,
+                                    default_value=app_state.recording.frame_index,
+                                    min_value=0,
+                                    max_value=max(
+                                        0, app_state.recording.frame_count - 1
+                                    ),
+                                    callback=on_recording_frame_change,
+                                    width=220,
+                                    enabled=app_state.recording.reader is not None,
+                                )
+                                dpg.add_text(
+                                    "No recording loaded",
+                                    tag=app_state.recording.frame_text_tag,
+                                )
 
                                 # Color picker display
                                 dpg.add_separator()
