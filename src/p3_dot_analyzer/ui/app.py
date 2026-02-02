@@ -21,6 +21,7 @@ from .areas_panel import build_named_areas_controls
 from .events import create_mouse_handlers, make_on_image_loaded_callback
 from .recording_panel import (
     build_recording_tab,
+    open_selected_recording,
     refresh_recordings_list,
     render_recording_frame,
     update_recording_frame_text,
@@ -193,6 +194,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
 
     def on_recording_frame_change(_sender: int, app_data: int) -> None:
         render_recording_frame(app_state, int(app_data), on_image_loaded)
+        schedule_settings_save(app_state)
 
     def on_batch_analyze_clicked(_sender: int, _app_data: None) -> None:
         """Handle batch analysis button click."""
@@ -264,10 +266,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 dpg.add_text("", tag=app_state.ui.timestamp_text_tag)
 
                 def on_tab_change(_sender: int, app_data: int, _user_data: str) -> None:
-                    # No idea what the ID is
-                    app_state.ui.active_tab = (
-                        "recording_tab" if app_data == 41 else "analysis_tab"
-                    )
+                    tab_key = dpg.get_item_user_data(app_data)
+                    if tab_key in ("recording_tab", "analysis_tab"):
+                        app_state.ui.active_tab = tab_key
+                        schedule_settings_save(app_state)
 
                 with dpg.tab_bar(tag="tab_bar", callback=on_tab_change):
                     with dpg.tab(
@@ -278,7 +280,9 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                         build_recording_tab(app_state, camera, on_image_loaded)
 
                     with dpg.tab(
-                        label="Analysis", tag="analysis_tab", user_data="analysis_tab"
+                        label="Analysis",
+                        tag="analysis_tab",
+                        user_data="analysis_tab",
                     ):
                         with dpg.group(horizontal=True):
                             # Left side: image area
@@ -387,9 +391,17 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                         )
                         build_percentile_table(app_state)
 
+                dpg.set_value("tab_bar", app_state.ui.active_tab)
+
     update_recording_frame_text(app_state)
     refresh_recordings_list(app_state, on_image_loaded)
     refresh_areas_list(app_state)
+    if app_state.recording.selected_recording_path is not None:
+        if app_state.recording.selected_recording_path.exists():
+            open_selected_recording(app_state, on_image_loaded)
+        else:
+            app_state.recording.selected_recording_path = None
+            app_state.recording.frame_index = 0
 
     handlers = create_mouse_handlers(app_state, on_areas_changed)
     # Global mouse handlers for color picking and area creation

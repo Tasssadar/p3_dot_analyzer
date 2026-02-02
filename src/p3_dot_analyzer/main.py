@@ -62,6 +62,14 @@ def run() -> None:
     settings = load_settings(settings_path)
     if settings is not None:
         apply_settings_to_state(app_state, settings)
+        selected_name = settings.get("selected_recording_name")
+        if isinstance(selected_name, str) and selected_name:
+            candidate = app_state.recording.recordings_dir / selected_name
+            if candidate.exists():
+                app_state.recording.selected_recording_path = candidate
+            else:
+                app_state.recording.selected_recording_path = None
+                app_state.recording.frame_index = 0
 
     if app_state.render.temp_max <= app_state.render.temp_min:
         app_state.render.temp_max = app_state.render.temp_min + 0.1

@@ -16,6 +16,7 @@ from ..camera import (
     CamEvRecordingStats,
 )
 from ..state import AppState
+from ..settings_io import schedule_settings_save
 from ..ui_helpers import render_frame, update_status
 
 
@@ -116,25 +117,38 @@ def close_recording_reader(state: AppState) -> None:
 def open_selected_recording(
     state: AppState, on_image_loaded: Callable[[AppState], None] | None = None
 ) -> None:
-    close_recording_reader(state)
+    if state.recording.reader is not None:
+        state.recording.reader.close()
+        state.recording.reader = None
+
     target = state.recording.selected_recording_path
     if target is None:
+        close_recording_reader(state)
         return
     if state.recording.active and state.recording.current_recording_path == target:
         update_status(state, "Recording is active; stop it to analyze.")
+        close_recording_reader(state)
         return
+
     try:
         reader = RecordingReader(target)
     except OSError as exc:
         update_status(state, f"Failed to open recording: {exc}")
+        close_recording_reader(state)
         return
+
     if reader.frame_count == 0:
         reader.close()
         update_status(state, "Recording is empty.")
+        close_recording_reader(state)
         return
+
     state.recording.reader = reader
     state.recording.frame_count = reader.frame_count
-    state.recording.frame_index = 0
+    saved_index = state.recording.frame_index
+    state.recording.frame_index = max(
+        0, min(state.recording.frame_count - 1, saved_index)
+    )
     if dpg.does_item_exist(state.recording.slider_tag):
         dpg.configure_item(
             state.recording.slider_tag,
@@ -175,6 +189,8 @@ def refresh_recordings_list(
             if not app_data:
                 return
             state.recording.selected_recording_path = user_data
+            state.recording.frame_index = 0
+            schedule_settings_save(state)
             update_status(state, f"Selected recording: {user_data.name}")
             open_selected_recording(state, on_image_loaded)
             refresh_recordings_list(state, on_image_loaded)
@@ -216,6 +232,7 @@ def refresh_recordings_list(
                     if state.recording.selected_recording_path == user_data:
                         state.recording.selected_recording_path = None
                         close_recording_reader(state)
+                        schedule_settings_save(state)
                     update_status(state, f"Deleted recording: {user_data.name}")
                 except OSError as exc:
                     update_status(
@@ -263,6 +280,7 @@ def show_rename_modal(
             target_path.rename(new_path)
             if state.recording.selected_recording_path == target_path:
                 state.recording.selected_recording_path = new_path
+                schedule_settings_save(state)
                 open_selected_recording(state, on_image_loaded)
             update_status(state, f"Renamed recording to: {new_path.name}")
         except OSError as exc:

@@ -4,8 +4,6 @@ from pathlib import Path
 import json
 from typing import Any
 
-from p3_viewer import ColormapID  # type: ignore
-
 from .models import NamedArea, NamedAreaData, SettingsData
 from .state import AppState
 
@@ -73,6 +71,14 @@ def _parse_named_areas(value: Any) -> list[NamedArea]:
 
 
 def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None:
+    if "active_tab" in settings:
+        active_tab = settings["active_tab"]
+        if isinstance(active_tab, str) and active_tab in (
+            "recording_tab",
+            "analysis_tab",
+        ):
+            app_state.ui.active_tab = active_tab
+
     if "base_x" in settings:
         base_x = _clamp_int(settings["base_x"], 0, 10**9)
         if base_x is not None:
@@ -111,6 +117,11 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
         sampling = _clamp_int(settings["batch_sampling_rate"], 1, 100)
         if sampling is not None:
             app_state.analysis.batch_sampling_rate = sampling
+
+    if "recording_frame_index" in settings:
+        index = _clamp_int(settings["recording_frame_index"], 0, 10**9)
+        if index is not None:
+            app_state.recording.frame_index = index
 
     if "named_areas" in settings:
         app_state.areas.named_areas = _parse_named_areas(settings["named_areas"])
@@ -157,7 +168,13 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         }
         for area in app_state.areas.named_areas
     ]
+    selected_recording_name = (
+        app_state.recording.selected_recording_path.name
+        if app_state.recording.selected_recording_path is not None
+        else None
+    )
     return {
+        "active_tab": app_state.ui.active_tab,
         "base_x": app_state.analysis.base_x,
         "base_y": app_state.analysis.base_y,
         "analysis_mode_enabled": app_state.analysis.enabled,
@@ -166,6 +183,8 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         "max_area": app_state.analysis.max_area,
         "min_circularity": app_state.analysis.min_circularity,
         "batch_sampling_rate": app_state.analysis.batch_sampling_rate,
+        "selected_recording_name": selected_recording_name,
+        "recording_frame_index": app_state.recording.frame_index,
         "named_areas": named_areas,
         "render_temp_min": app_state.render.temp_min,
         "render_temp_max": app_state.render.temp_max,

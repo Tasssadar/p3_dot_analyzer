@@ -367,13 +367,6 @@ def run_batch_analysis(
 
             area_counts_res[area_name].append(cur_pct)
 
-    for pct, areas in percentile_for_area.items():
-        print(f"{pct}% remaining:")
-        for area_name, ps in areas.items():
-            print(
-                f"  {area_name}: {ps.count} at {ps.timestamp:.2f}s, {ps.base_temp_c:.2f} °C"
-            )
-
     # Store result
     app_state.analysis.batch_result = BatchAnalysisResult(
         timestamps=timestamps,

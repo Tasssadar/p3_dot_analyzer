@@ -34,6 +34,9 @@ class SettingsData(TypedDict, total=False):
     batch_sampling_rate: int
     named_areas: list[NamedAreaData]
     current_index: int
+    active_tab: str
+    selected_recording_name: str | None
+    recording_frame_index: int
     render_temp_min: float
     render_temp_max: float
     render_colormap: str
