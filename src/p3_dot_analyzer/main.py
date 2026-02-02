@@ -6,6 +6,8 @@ import os
 
 import dearpygui.dearpygui as dpg  # type: ignore
 
+from .models import NamedArea
+
 from .camera import (
     RENDER_HEIGHT,
     RENDER_WIDTH,
@@ -44,6 +46,16 @@ def run() -> None:
         settings=SettingsState(path=settings_path),
     )
     app_state.recording.recordings_dir = base_dir / "recordings"
+
+    # Add default areas
+    app_state.analysis.base_x = 466
+    app_state.analysis.base_y = 192
+    app_state.areas.named_areas.append(
+        NamedArea(name="Smes", x=60, y=206, width=411, height=63)
+    )
+    app_state.areas.named_areas.append(
+        NamedArea(name="Voda", x=60, y=277, width=420, height=65)
+    )
 
     camera = Camera()
 

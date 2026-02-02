@@ -402,6 +402,17 @@ def build_recording_tab(
                 state.recording.current_recording_path = None
                 refresh_recordings_list(state, on_image_loaded)
 
+            with dpg.theme() as theme_start:
+                with dpg.theme_component(dpg.mvButton):
+                    dpg.add_theme_color(
+                        dpg.mvThemeCol_Button, (0, 140, 0), category=dpg.mvThemeCat_Core
+                    )
+            with dpg.theme() as theme_stop:
+                with dpg.theme_component(dpg.mvButton):
+                    dpg.add_theme_color(
+                        dpg.mvThemeCol_Button, (140, 0, 0), category=dpg.mvThemeCat_Core
+                    )
+
             dpg.add_button(
                 label="Start",
                 callback=on_start_recording,
@@ -409,6 +420,7 @@ def build_recording_tab(
                 width=200,
                 height=50,
             )
+            dpg.bind_item_theme(dpg.last_item(), theme_start)
             dpg.add_button(
                 label="Pause",
                 tag=state.recording.pause_button_tag,
@@ -423,4 +435,5 @@ def build_recording_tab(
                 width=200,
                 height=50,
             )
+            dpg.bind_item_theme(dpg.last_item(), theme_stop)
             update_recording_buttons(state)

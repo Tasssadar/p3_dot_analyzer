@@ -125,12 +125,13 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
         if temp_max is not None:
             app_state.render.temp_max = temp_max
 
-    if "render_colormap" in settings:
-        name = settings["render_colormap"]
-        if isinstance(name, str):
-            mapping = {colormap.name: colormap for colormap in ColormapID}
-            if name in mapping:
-                app_state.render.colormap = mapping[name]
+    # We only work with WHITEHOT, don't allow changing it
+    # if "render_colormap" in settings:
+    #    name = settings["render_colormap"]
+    #    if isinstance(name, str):
+    #        mapping = {colormap.name: colormap for colormap in ColormapID}
+    #        if name in mapping:
+    #            app_state.render.colormap = mapping[name]
 
     if "render_emissivity" in settings:
         emissivity = _clamp_float(settings["render_emissivity"], 0.0, 1.0)

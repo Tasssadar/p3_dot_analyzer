@@ -73,6 +73,8 @@ class AnalysisState:
     batch_analyze_button_tag: str = "batch_analyze_button"
     batch_chart_window_tag: str = "batch_chart_window"
     batch_plot_tag: str = "batch_plot"
+    batch_percentile_container_tag: str = "batch_percentile_container"
+    batch_percentile_table_tag: str = "batch_percentile_table"
 
 
 @dataclass(slots=True)

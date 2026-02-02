@@ -362,7 +362,7 @@ def run_batch_analysis(
             while pct_stack_for_area and cur_pct <= pct_stack_for_area[0]:
                 pct = pct_stack_for_area.pop(0)
                 percentile_for_area[pct][area_name] = AreaPStatPoint(
-                    p.timestamp, p.base_temp_c, c
+                    p.timestamp, p.base_temp_c, cur
                 )
 
             area_counts_res[area_name].append(cur_pct)

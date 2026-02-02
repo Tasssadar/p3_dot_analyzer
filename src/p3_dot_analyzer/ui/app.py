@@ -11,7 +11,12 @@ from ..render import render
 from ..services.analysis_service import run_batch_analysis
 from ..settings_io import schedule_settings_save
 from ..ui_helpers import update_status, render_frame
-from .analysis_panel import build_analysis_controls, show_batch_results_chart
+from .analysis_panel import (
+    build_analysis_controls,
+    build_percentile_table,
+    show_batch_results_chart,
+    update_percentile_table,
+)
 from .areas_panel import build_named_areas_controls
 from .events import create_mouse_handlers, make_on_image_loaded_callback
 from .recording_panel import (
@@ -217,7 +222,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         # Re-enable button
         dpg.configure_item(app_state.analysis.batch_analyze_button_tag, enabled=True)
         dpg.configure_item(
-            app_state.analysis.batch_analyze_button_tag, label="Analyze Whole Batch"
+            app_state.analysis.batch_analyze_button_tag, label="Analyze Recording"
         )
 
         if app_state.analysis.batch_result is not None:
@@ -226,6 +231,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 f"Batch analysis complete: {len(app_state.analysis.batch_result.timestamps)} samples",
             )
             show_batch_results_chart(app_state)
+            update_percentile_table(app_state)
         else:
             update_status(app_state, "Batch analysis failed")
 
@@ -296,33 +302,33 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                 dpg.add_separator()
                                 dpg.add_text("Render Config")
                                 with dpg.group(horizontal=True):
-                                    with dpg.group():
-                                        dpg.add_input_float(
-                                            label="Temp Min (C)",
-                                            default_value=app_state.render.temp_min,
-                                            callback=on_render_temp_min_change,
-                                            tag=app_state.render.temp_min_input_tag,
-                                            width=120,
-                                            format="%.2f",
-                                        )
-                                        dpg.add_input_float(
-                                            label="Temp Max (C)",
-                                            default_value=app_state.render.temp_max,
-                                            callback=on_render_temp_max_change,
-                                            tag=app_state.render.temp_max_input_tag,
-                                            width=120,
-                                            format="%.2f",
-                                        )
-                                    dpg.add_combo(
-                                        label="Colormap",
-                                        items=[
-                                            colormap.name for colormap in ColormapID
-                                        ],
-                                        default_value=app_state.render.colormap.name,
-                                        callback=on_render_colormap_change,
-                                        tag=app_state.render.colormap_combo_tag,
-                                        width=160,
+                                    dpg.add_input_float(
+                                        label="Temp Min (C)",
+                                        default_value=app_state.render.temp_min,
+                                        callback=on_render_temp_min_change,
+                                        tag=app_state.render.temp_min_input_tag,
+                                        width=120,
+                                        format="%.2f",
                                     )
+                                    dpg.add_input_float(
+                                        label="Temp Max (C)",
+                                        default_value=app_state.render.temp_max,
+                                        callback=on_render_temp_max_change,
+                                        tag=app_state.render.temp_max_input_tag,
+                                        width=120,
+                                        format="%.2f",
+                                    )
+                                    # We only work with WHITEHOT
+                                    # dpg.add_combo(
+                                    #    label="Colormap",
+                                    #    items=[
+                                    #        colormap.name for colormap in ColormapID
+                                    #    ],
+                                    #    default_value=app_state.render.colormap.name,
+                                    #    callback=on_render_colormap_change,
+                                    #    tag=app_state.render.colormap_combo_tag,
+                                    #    width=160,
+                                    # )
                                 with dpg.group(horizontal=True):
                                     dpg.add_input_float(
                                         label="Emissivity",
@@ -375,6 +381,11 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     on_sampling_rate_change,
                                     on_batch_analyze_clicked,
                                 )
+                        dpg.add_separator()
+                        dpg.add_text(
+                            "Percentile Stats (90% == 90% of dots still remain unfrozen)"
+                        )
+                        build_percentile_table(app_state)
 
     update_recording_frame_text(app_state)
     refresh_recordings_list(app_state, on_image_loaded)

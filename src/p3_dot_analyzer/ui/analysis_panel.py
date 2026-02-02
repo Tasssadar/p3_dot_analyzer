@@ -67,6 +67,71 @@ def show_batch_results_chart(state: AppState) -> None:
                     dpg.bind_item_theme(dpg.last_item(), create_line_theme(color))
 
 
+def build_percentile_table(state: AppState) -> None:
+    with dpg.child_window(
+        tag=state.analysis.batch_percentile_container_tag,
+        border=True,
+        height=180,
+        width=-1,
+    ):
+        dpg.add_text("Run batch analysis to see percentile stats.")
+
+
+def update_percentile_table(state: AppState) -> None:
+    if not dpg.does_item_exist(state.analysis.batch_percentile_container_tag):
+        return
+
+    dpg.delete_item(state.analysis.batch_percentile_container_tag, children_only=True)
+
+    if state.analysis.batch_result is None:
+        dpg.add_text(
+            "Run batch analysis to see percentile stats.",
+            parent=state.analysis.batch_percentile_container_tag,
+        )
+        return
+
+    percentiles = sorted(
+        state.analysis.batch_result.percentile_for_area.keys(), reverse=True
+    )
+    if not percentiles:
+        dpg.add_text(
+            "No percentile data available.",
+            parent=state.analysis.batch_percentile_container_tag,
+        )
+        return
+
+    with dpg.table(
+        tag=state.analysis.batch_percentile_table_tag,
+        header_row=True,
+        resizable=True,
+        policy=dpg.mvTable_SizingStretchProp,
+        borders_innerH=True,
+        borders_innerV=True,
+        borders_outerH=True,
+        borders_outerV=True,
+        parent=state.analysis.batch_percentile_container_tag,
+    ):
+        dpg.add_table_column(label="Area")
+        for pct in percentiles:
+            dpg.add_table_column(label=f"{pct}%")
+
+        for area in state.areas.named_areas:
+            area_name = area.name
+            with dpg.table_row():
+                dpg.add_text(area_name)
+                for pct in percentiles:
+                    area_map = state.analysis.batch_result.percentile_for_area.get(
+                        pct, {}
+                    )
+                    ps = area_map.get(area_name)
+                    if ps is None:
+                        dpg.add_text("--")
+                    else:
+                        dpg.add_text(
+                            f"{ps.timestamp:6.2f}s   {ps.base_temp_c:4.2f} °C    {ps.count:4} unfrozen"
+                        )
+
+
 def build_analysis_controls(
     state: AppState,
     on_analysis_toggle: Callable[[int, bool], None],
@@ -133,21 +198,34 @@ def build_analysis_controls(
 
     # Batch analysis controls
     dpg.add_separator()
+    dpg.add_spacer(height=5)
+
     dpg.add_text("Batch Analysis:")
-    dpg.add_input_int(
-        label="Sampling (1-100)",
-        default_value=state.analysis.batch_sampling_rate,
-        min_value=1,
-        max_value=100,
-        min_clamped=True,
-        max_clamped=True,
-        callback=on_sampling_rate_change,
-        tag=state.analysis.batch_sampling_input_tag,
-        width=100,
-    )
-    dpg.add_text("(e.g., 5 = every 5th image)", color=(150, 150, 150))
-    dpg.add_button(
-        label="Analyze Whole Batch",
-        callback=on_batch_analyze_clicked,
-        tag=state.analysis.batch_analyze_button_tag,
-    )
+    with dpg.group(horizontal=True):
+        with dpg.theme() as analyze_theme:
+            with dpg.theme_component(dpg.mvButton):
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_Button, (0, 140, 0), category=dpg.mvThemeCat_Core
+                )
+
+        dpg.add_button(
+            label="Analyze Recording",
+            height=50,
+            width=200,
+            callback=on_batch_analyze_clicked,
+            tag=state.analysis.batch_analyze_button_tag,
+        )
+        dpg.bind_item_theme(dpg.last_item(), analyze_theme)
+        with dpg.group():
+            dpg.add_input_int(
+                label="Sampling (1-100)",
+                default_value=state.analysis.batch_sampling_rate,
+                min_value=1,
+                max_value=100,
+                min_clamped=True,
+                max_clamped=True,
+                callback=on_sampling_rate_change,
+                tag=state.analysis.batch_sampling_input_tag,
+                width=100,
+            )
+            dpg.add_text("(e.g., 5 = every 5th image)", color=(150, 150, 150))
