@@ -9,6 +9,8 @@ import time
 import cv2
 import numpy as np
 
+from p3_dot_analyzer.camera import RecordingReader
+
 from ..ui_helpers import get_temp_at_img
 
 from ..models import BatchAnalysisResult, NamedArea, AreaPStatPoint
@@ -259,31 +261,17 @@ class _BatchPoint:
     area_counts: dict[str, int]
 
 
-def run_batch_analysis(
+def _collect_batch_points(
     app_state: AppState,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> None:
-    """Run batch analysis on all images with sampling."""
-    # Check prerequisites
-    if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
-        return
-
-    if not app_state.areas.named_areas:
-        return
-
-    reader = app_state.recording.reader
-    if not reader or not reader.frame_count:
-        return
-
-    sampling_rate = max(1, min(100, app_state.analysis.batch_sampling_rate))
-
-    # Initialize result storage
+    reader: RecordingReader,
+    sampling_rate: int,
+    progress_callback: Callable[[int, int], None] | None,
+) -> tuple[list[_BatchPoint], dict[str, int]]:
     points: list[_BatchPoint] = []
     area_max_counts: dict[str, int] = {
         area.name: 0 for area in app_state.areas.named_areas
     }
 
-    # Get indices to process based on sampling
     indices_to_process = list(range(0, reader.frame_count, sampling_rate))
     total = len(indices_to_process)
 
@@ -300,7 +288,6 @@ def run_batch_analysis(
             r = fut.result()
             progress_idx += 1
 
-            # Report progress
             now = time.monotonic()
             if now - last_progress_time > 0.3:
                 last_progress_time = now
@@ -310,7 +297,6 @@ def run_batch_analysis(
             if r.marks is None:
                 counts = {area.name: 0 for area in app_state.areas.named_areas}
             else:
-                # Count marks in areas
                 counts = count_marks_in_areas(r.marks, app_state.areas.named_areas)
 
                 for area_name, c in counts.items():
@@ -326,17 +312,20 @@ def run_batch_analysis(
             )
 
     points.sort(key=lambda p: p.timestamp)
+    return points, area_max_counts
 
+
+def _build_batch_result(
+    points: list[_BatchPoint],
+    area_max_counts: dict[str, int],
+    named_areas: list[NamedArea],
+) -> BatchAnalysisResult:
     timestamps = [p.timestamp for p in points]
 
-    area_counts_res: dict[str, list[int]] = {
-        area.name: [] for area in app_state.areas.named_areas
-    }
+    area_counts_res: dict[str, list[int]] = {area.name: [] for area in named_areas}
     area_min_counts = area_max_counts.copy()
 
-    percentiles_stack = {
-        area.name: list(WANTED_PERCENTILES) for area in app_state.areas.named_areas
-    }
+    percentiles_stack = {area.name: list(WANTED_PERCENTILES) for area in named_areas}
 
     percentile_for_area: dict[int, dict[str, AreaPStatPoint]] = {
         pct: {} for pct in WANTED_PERCENTILES
@@ -367,9 +356,38 @@ def run_batch_analysis(
 
             area_counts_res[area_name].append(cur_pct)
 
-    # Store result
-    app_state.analysis.batch_result = BatchAnalysisResult(
+    return BatchAnalysisResult(
         timestamps=timestamps,
         area_counts=area_counts_res,
         percentile_for_area=percentile_for_area,
+    )
+
+
+def run_batch_analysis(
+    app_state: AppState,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> None:
+    """Run batch analysis on all images with sampling."""
+    # Check prerequisites
+    if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
+        return
+
+    if not app_state.areas.named_areas:
+        return
+
+    reader = app_state.recording.reader
+    if not reader or not reader.frame_count:
+        return
+
+    sampling_rate = max(1, min(100, app_state.analysis.batch_sampling_rate))
+    points, area_max_counts = _collect_batch_points(
+        app_state,
+        reader,
+        sampling_rate,
+        progress_callback,
+    )
+    app_state.analysis.batch_result = _build_batch_result(
+        points,
+        area_max_counts,
+        app_state.areas.named_areas,
     )
