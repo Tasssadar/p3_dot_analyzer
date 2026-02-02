@@ -24,6 +24,21 @@ def draw_analysis_overlays(app_state: AppState, marks: list[DetectedMark]) -> No
     app_state.analysis.overlay_tags.clear()
 
     # Draw each detected mark
+    if app_state.analysis.base_x is not None and app_state.analysis.base_y is not None:
+        marker_size = 6
+        half = marker_size // 2
+        tag = "analysis_base_point"
+        dpg.draw_rectangle(
+            pmin=(app_state.analysis.base_x - half, app_state.analysis.base_y - half),
+            pmax=(app_state.analysis.base_x + half, app_state.analysis.base_y + half),
+            color=(0, 255, 0, 255),
+            fill=(0, 255, 0, 50),
+            thickness=2,
+            tag=tag,
+            parent=app_state.ui.image_drawlist_tag,
+        )
+        app_state.analysis.overlay_tags.append(tag)
+
     for i, mark in enumerate(marks):
         tag = f"analysis_mark_{i}"
 
@@ -36,7 +51,7 @@ def draw_analysis_overlays(app_state: AppState, marks: list[DetectedMark]) -> No
         dpg.draw_circle(
             center=(mark.center_x, mark.center_y),
             radius=radius + 3,  # Slightly larger than the mark
-            color=(255, 255, 0, 255),  # Yellow outline
+            color=(255, 0, 0, 255),
             thickness=2,
             tag=tag,
             parent=app_state.ui.image_drawlist_tag,

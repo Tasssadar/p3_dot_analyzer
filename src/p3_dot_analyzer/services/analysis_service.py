@@ -11,7 +11,6 @@ import numpy as np
 
 from ..models import BatchAnalysisResult, NamedArea
 from ..state import AppState
-from ..ui_helpers import color_for_temp
 
 
 @dataclass
@@ -27,28 +26,27 @@ class DetectedMark:
 
 def detect_colored_marks(
     image_rgba_dpg: np.ndarray,
-    target_rgb: tuple[int, int, int],
+    base_x: int,
+    base_y: int,
     tolerance: int = 30,
     min_area: int = 200,
+    max_area: int = 200,
     min_circularity: float = 0.5,
 ) -> list[DetectedMark]:
     """Detect circular/elliptical marks of a specific color in the image.
 
     Args:
         image_bgr: Image in BGR format (as loaded by OpenCV).
-        target_rgb: Target color in RGB format.
+        base_x: Base point x coordinate in image space.
+        base_y: Base point y coordinate in image space.
         tolerance: Tolerance for color matching in HSV space.
         min_area: Minimum contour area to consider.
+        max_area: Maximum contour area to consider.
         min_circularity: Minimum circularity threshold (0-1, circle=1).
 
     Returns:
         List of detected marks with their positions and dimensions.
     """
-    # Convert target RGB to BGR then to HSV
-    target_bgr = np.array(
-        [[[target_rgb[2], target_rgb[1], target_rgb[0]]]], dtype=np.uint8
-    )
-    target_hsv = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2HSV)[0][0]
 
     # Convert image to HSV
     # rgba: H x W x 4, float32 in [0,1]
@@ -59,74 +57,45 @@ def detect_colored_marks(
     # BGR -> HSV
     image_hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
 
-    # Create color range with tolerance
-    h, s, v = target_hsv
-    # Hue wraps around at 180, so handle that specially
-    h_tolerance = min(tolerance // 2, 20)  # Hue is 0-179 in OpenCV
-    s_tolerance = tolerance
+    # Get base point temperature (color)
+    base = image_hsv[base_y, base_x]
+
+    # We use B&W image only, so we only count with V
+    _, _, v = base
     v_tolerance = tolerance
 
+    # Cut off everything below base + tolerance
     lower_bound = np.array(
         [
-            max(0, int(h) - h_tolerance),
-            max(0, int(s) - s_tolerance),
-            max(0, int(v) - v_tolerance),
+            0,
+            0,
+            min(255, int(v) + v_tolerance),
         ]
     )
     upper_bound = np.array(
         [
-            min(179, int(h) + h_tolerance),
-            min(255, int(s) + s_tolerance),
-            min(255, int(v) + v_tolerance),
+            179,
+            255,
+            255,
         ]
     )
 
     # Create mask for the target color
     mask = cv2.inRange(image_hsv, lower_bound, upper_bound)
 
-    # Handle hue wrap-around for red colors (hue near 0 or 180)
-    if h < h_tolerance:
-        # Also include high hue values
-        lower2 = np.array(
-            [
-                180 - (h_tolerance - int(h)),
-                max(0, int(s) - s_tolerance),
-                max(0, int(v) - v_tolerance),
-            ],
-            dtype=np.int64,
-        )
-        upper2 = np.array(
-            [179, min(255, s + s_tolerance), min(255, v + v_tolerance)],
-            dtype=np.int64,
-        )
-        mask2 = cv2.inRange(image_hsv, lower2, upper2)
-        mask = cv2.bitwise_or(mask, mask2)
-    elif h > 179 - h_tolerance:
-        # Also include low hue values
-        lower2 = np.array([0, max(0, s - s_tolerance), max(0, v - v_tolerance)])
-        upper2 = np.array(
-            [
-                h_tolerance - (179 - h),
-                min(255, s + s_tolerance),
-                min(255, v + v_tolerance),
-            ]
-        )
-        mask2 = cv2.inRange(image_hsv, lower2, upper2)
-        mask = cv2.bitwise_or(mask, mask2)
-
-    # Morphological operations to clean up noise
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # cv2.imshow("image", mask)
+    # cv2.waitKey(0)
 
     # Find contours
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     detected_marks: list[DetectedMark] = []
 
     for contour in contours:
         area = cv2.contourArea(contour)
         if area < min_area:
+            continue
+        if area > max_area:
             continue
 
         perimeter = cv2.arcLength(contour, True)
@@ -201,12 +170,18 @@ def analyze_current_frame(
 ) -> tuple[list[DetectedMark], dict[str, int]] | None:
     if not app_state.analysis.enabled:
         return None
-    if app_state.analysis.selected_temp is None:
+    if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
         return None
     if app_state.render.current_frame is None:
         return None
+    if (
+        app_state.analysis.base_x < 0
+        or app_state.analysis.base_y < 0
+        or app_state.analysis.base_x >= app_state.render.current_frame.width
+        or app_state.analysis.base_y >= app_state.render.current_frame.height
+    ):
+        return None
 
-    target_rgb = color_for_temp(app_state, app_state.analysis.selected_temp)
     marks = detect_colored_marks(
         app_state.render.current_frame.img.reshape(
             (
@@ -215,9 +190,11 @@ def analyze_current_frame(
                 4,
             )
         ),
-        target_rgb,
+        app_state.analysis.base_x,
+        app_state.analysis.base_y,
         tolerance=app_state.analysis.color_tolerance,
         min_area=app_state.analysis.min_area,
+        max_area=app_state.analysis.max_area,
         min_circularity=app_state.analysis.min_circularity,
     )
     counts = count_marks_in_areas(marks, app_state.areas.named_areas)
@@ -238,15 +215,24 @@ def _load_and_detect(
         # If image fails to load, record zeros
         return (image_index, 0, None)
 
-    assert app_state.analysis.selected_temp is not None
-    target_rgb = color_for_temp(app_state, app_state.analysis.selected_temp)
+    assert app_state.analysis.base_x is not None
+    assert app_state.analysis.base_y is not None
+    if (
+        app_state.analysis.base_x < 0
+        or app_state.analysis.base_y < 0
+        or app_state.analysis.base_x >= frame.width
+        or app_state.analysis.base_y >= frame.height
+    ):
+        return (image_index, frame.ts, None)
 
     # Detect marks
     marks = detect_colored_marks(
         frame.img.reshape((frame.height, frame.width, 4)),
-        target_rgb,
+        app_state.analysis.base_x,
+        app_state.analysis.base_y,
         tolerance=app_state.analysis.color_tolerance,
         min_area=app_state.analysis.min_area,
+        max_area=app_state.analysis.max_area,
         min_circularity=app_state.analysis.min_circularity,
     )
     return (image_index, frame.ts, marks)
@@ -258,7 +244,7 @@ def run_batch_analysis(
 ) -> None:
     """Run batch analysis on all images with sampling."""
     # Check prerequisites
-    if app_state.analysis.selected_temp is None:
+    if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
         return
 
     if not app_state.areas.named_areas:

@@ -10,6 +10,7 @@ from .camera import CamFrame, RecordingReader
 from .constants import (
     DEFAULT_BATCH_SAMPLING_RATE,
     DEFAULT_COLOR_TOLERANCE,
+    DEFAULT_MAX_AREA,
     DEFAULT_MIN_AREA,
     DEFAULT_MIN_CIRCULARITY,
     DEFAULT_RENDER_TEMP_MAX,
@@ -32,8 +33,6 @@ class UiState:
     status_text_tag: str
     timestamp_text_tag: str = "timestamp_text"
     hover_temp_text_tag: str = "hover_temp_text"
-    color_swatch_tag: str = "color_swatch"
-    color_text_tag: str = "color_text"
     active_tab: str = "recording_tab"
 
 
@@ -54,16 +53,19 @@ class RenderState:
 
 @dataclass(slots=True)
 class AnalysisState:
-    selected_temp: float | None = None
+    base_x: int | None = None
+    base_y: int | None = None
     enabled: bool = DEFAULT_ANALYSIS_ENABLED
     checkbox_tag: str = "analysis_checkbox"
     overlay_tags: list[str] = field(default_factory=list)
     area_mark_counts: dict[str, int] = field(default_factory=dict)
     color_tolerance: int = DEFAULT_COLOR_TOLERANCE
     min_area: int = DEFAULT_MIN_AREA
+    max_area: int = DEFAULT_MAX_AREA
     min_circularity: float = DEFAULT_MIN_CIRCULARITY
     tolerance_input_tag: str = "tolerance_input"
     min_area_input_tag: str = "min_area_input"
+    max_area_input_tag: str = "max_area_input"
     min_circularity_input_tag: str = "min_circularity_input"
     batch_result: BatchAnalysisResult | None = None
     batch_sampling_rate: int = DEFAULT_BATCH_SAMPLING_RATE
@@ -100,6 +102,7 @@ class RecordingState:
     drawlist_tag: str = "recording_drawlist"
     draw_tag: str = "recording_draw"
     status_tag: str = "recording_status_text"
+    camera_status_tag: str = "recording_camera_status_text"
     frame_period_ms: int = DEFAULT_RECORDING_FRAME_PERIOD_MS
     frame_period_input_tag: str = "recording_frame_period_input"
     start_button_tag: str = "recording_start_button"

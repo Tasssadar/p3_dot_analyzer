@@ -72,6 +72,7 @@ def build_analysis_controls(
     on_analysis_toggle: Callable[[int, bool], None],
     on_tolerance_change: Callable[[int, int], None],
     on_min_area_change: Callable[[int, int], None],
+    on_max_area_change: Callable[[int, int], None],
     on_min_circularity_change: Callable[[int, float], None],
     on_sampling_rate_change: Callable[[int, int], None],
     on_batch_analyze_clicked: Callable[[int, None], None],
@@ -104,6 +105,17 @@ def build_analysis_controls(
         max_clamped=True,
         callback=on_min_area_change,
         tag=state.analysis.min_area_input_tag,
+        width=120,
+    )
+    dpg.add_input_int(
+        label="Max Area (10-5000)",
+        default_value=state.analysis.max_area,
+        min_value=10,
+        max_value=5000,
+        min_clamped=True,
+        max_clamped=True,
+        callback=on_max_area_change,
+        tag=state.analysis.max_area_input_tag,
         width=120,
     )
     dpg.add_input_float(

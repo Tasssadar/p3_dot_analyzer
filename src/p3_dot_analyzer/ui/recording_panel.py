@@ -315,6 +315,7 @@ def build_recording_tab(
                     pmax=(1, 1),  # updated on render
                     tag=state.recording.draw_tag,
                 )
+            dpg.add_text("Camera status: --", tag=state.recording.camera_status_tag)
         with dpg.group():
             dpg.add_text("Recording Controls")
             dpg.add_separator()

@@ -8,12 +8,7 @@ import dearpygui.dearpygui as dpg  # type: ignore
 from ..state import AppState
 from ..named_areas import redraw_area_overlays, show_area_name_popup
 from ..settings_io import schedule_settings_save
-from ..ui_helpers import (
-    screen_to_image_coords,
-    get_temp_at,
-    update_color_display,
-    update_status,
-)
+from ..ui_helpers import screen_to_image_coords, get_temp_at, update_status
 
 
 @dataclass(slots=True)
@@ -41,30 +36,29 @@ def make_on_image_loaded_callback(
 def create_mouse_handlers(
     app_state: AppState, on_analysis_update: Callable[[AppState], None]
 ) -> MouseHandlers:
-    """Create mouse handlers for temperature selection and area creation."""
+    """Create mouse handlers for base point selection and area creation."""
 
     def on_mouse_click(_sender: int, _app_data: None) -> None:
-        # Global mouse click handler for color picking and area creation
+        # Global mouse click handler for base point picking and area creation
         if not dpg.is_item_hovered(app_state.ui.image_drawlist_tag):
             return
 
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
 
         if app_state.areas.interaction_mode == "view":
-            # Temperature picker mode - sample temp at click position
-            img_coords = screen_to_image_coords(app_state, mouse_x, mouse_y)
-            if img_coords is not None:
-                temp = get_temp_at(app_state, img_coords[0], img_coords[1])
-                if temp is not None:
-                    app_state.analysis.selected_temp = temp
-                    update_color_display(app_state)
-                    schedule_settings_save(app_state)
-                    update_status(
-                        app_state,
-                        f"Selected temp at ({img_coords[0]}, {img_coords[1]}): {temp:.2f} C",
-                    )
-                    # Run analysis if analysis mode is enabled
-                    on_analysis_update(app_state)
+            # Base point picker mode - store image coords at click position
+            img_x, img_y = screen_to_image_coords(app_state, mouse_x, mouse_y)
+            temp = get_temp_at(app_state, img_x, img_y)
+            if temp is not None:
+                app_state.analysis.base_x = img_x
+                app_state.analysis.base_y = img_y
+                schedule_settings_save(app_state)
+                update_status(
+                    app_state,
+                    f"Selected base point at ({img_x}, {img_y})",
+                )
+                # Run analysis if analysis mode is enabled
+                on_analysis_update(app_state)
 
     def on_mouse_move(_sender: int, _app_data: tuple[float, float]) -> None:
         if not dpg.is_item_hovered(app_state.ui.image_drawlist_tag):

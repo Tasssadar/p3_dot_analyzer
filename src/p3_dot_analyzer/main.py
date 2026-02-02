@@ -19,7 +19,7 @@ from .settings_io import apply_settings_to_state, get_settings_path, load_settin
 from .state import AppState, SettingsState, UiState
 from .ui.app import build_ui
 from .ui.recording_panel import update_recording_buttons, update_recording_indicator
-from .ui_helpers import render_frame, update_color_display, update_status
+from .ui_helpers import render_frame, update_recording_camera_status
 
 
 def run() -> None:
@@ -76,8 +76,6 @@ def run() -> None:
         )
 
     build_ui(app_state, camera)
-    update_color_display(app_state)
-
     dpg.create_viewport(title="P3 Camera Tecky - Image Viewer", width=1700, height=950)
     dpg.set_viewport_vsync(True)
     dpg.setup_dearpygui()
@@ -92,13 +90,15 @@ def run() -> None:
             match ev:
                 case CamEvVersion():
                     app_state.camera_connected = True
-                    update_status(
+                    update_recording_camera_status(
                         app_state, f"Camera connected: {ev.name} {ev.version}"
                     )
                     update_recording_buttons(app_state)
                 case CamEvConnectFailed():
                     app_state.camera_connected = False
-                    update_status(app_state, f"Connect failed: {ev.message}")
+                    update_recording_camera_status(
+                        app_state, f"Connect failed: {ev.message}"
+                    )
                     update_recording_buttons(app_state)
                 case CamEvRecordingStats():
                     if app_state.recording.active:

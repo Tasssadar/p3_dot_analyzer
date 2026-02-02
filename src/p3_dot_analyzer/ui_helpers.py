@@ -9,12 +9,16 @@ from .state import AppState
 from datetime import datetime
 
 from p3_camera import EnvParams, raw_to_celsius_corrected  # type: ignore[import-untyped]
-from p3_viewer import get_colormap  # type: ignore[import-untyped]
 
 
 def update_status(app_state: AppState, message: str) -> None:
     """Update the status text display."""
     dpg.set_value(app_state.ui.status_text_tag, message)
+
+
+def update_recording_camera_status(app_state: AppState, message: str) -> None:
+    """Update the camera status text on the recording tab."""
+    dpg.set_value(app_state.recording.camera_status_tag, message)
 
 
 def screen_to_image_coords(
@@ -73,38 +77,6 @@ def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
             env,
         )
     )
-
-
-def color_for_temp(app_state: AppState, temp: float) -> tuple[int, int, int]:
-    raw_min = app_state.render.temp_min
-    raw_max = app_state.render.temp_max
-    normalized = int(min(1.0, max(0.0, (temp - raw_min) / (raw_max - raw_min))) * 255)
-
-    bgr = get_colormap(app_state.render.colormap)[normalized]
-
-    return int(bgr[2]), int(bgr[1]), int(bgr[0])
-
-
-def update_color_display(app_state: AppState) -> None:
-    """Update the swatch and text display with the selected temperature."""
-    if app_state.analysis.selected_temp is None:
-        dpg.set_value(app_state.ui.color_text_tag, "No temperature selected")
-        # Draw a gray swatch to indicate no selection
-        dpg.configure_item(
-            app_state.ui.color_swatch_tag,
-            fill=(128, 128, 128, 255),
-        )
-    else:
-        r, g, b = color_for_temp(app_state, app_state.analysis.selected_temp)
-        dpg.set_value(
-            app_state.ui.color_text_tag,
-            f"Temp: {app_state.analysis.selected_temp:.2f} C",
-        )
-        # Update the swatch color
-        dpg.configure_item(
-            app_state.ui.color_swatch_tag,
-            fill=(r, g, b, 255),
-        )
 
 
 def render_frame(

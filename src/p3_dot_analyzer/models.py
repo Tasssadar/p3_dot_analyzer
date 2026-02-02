@@ -24,10 +24,12 @@ class NamedAreaData(TypedDict):
 
 
 class SettingsData(TypedDict, total=False):
-    selected_temp: float | None
+    base_x: int | None
+    base_y: int | None
     analysis_mode_enabled: bool
     color_tolerance: int
     min_area: int
+    max_area: int
     min_circularity: float
     batch_sampling_rate: int
     named_areas: list[NamedAreaData]

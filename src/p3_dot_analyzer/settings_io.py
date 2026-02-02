@@ -73,10 +73,15 @@ def _parse_named_areas(value: Any) -> list[NamedArea]:
 
 
 def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None:
-    if "selected_temp" in settings:
-        temp = _clamp_float(settings["selected_temp"], -100.0, 1000.0)
-        if temp is not None:
-            app_state.analysis.selected_temp = temp
+    if "base_x" in settings:
+        base_x = _clamp_int(settings["base_x"], 0, 10**9)
+        if base_x is not None:
+            app_state.analysis.base_x = base_x
+
+    if "base_y" in settings:
+        base_y = _clamp_int(settings["base_y"], 0, 10**9)
+        if base_y is not None:
+            app_state.analysis.base_y = base_y
 
     if "analysis_mode_enabled" in settings:
         if isinstance(settings["analysis_mode_enabled"], bool):
@@ -91,6 +96,11 @@ def apply_settings_to_state(app_state: AppState, settings: SettingsData) -> None
         min_area = _clamp_int(settings["min_area"], 10, 5000)
         if min_area is not None:
             app_state.analysis.min_area = min_area
+
+    if "max_area" in settings:
+        max_area = _clamp_int(settings["max_area"], 10, 5000)
+        if max_area is not None:
+            app_state.analysis.max_area = max_area
 
     if "min_circularity" in settings:
         min_circularity = _clamp_float(settings["min_circularity"], 0.0, 1.0)
@@ -147,10 +157,12 @@ def settings_from_state(app_state: AppState) -> SettingsData:
         for area in app_state.areas.named_areas
     ]
     return {
-        "selected_temp": app_state.analysis.selected_temp,
+        "base_x": app_state.analysis.base_x,
+        "base_y": app_state.analysis.base_y,
         "analysis_mode_enabled": app_state.analysis.enabled,
         "color_tolerance": app_state.analysis.color_tolerance,
         "min_area": app_state.analysis.min_area,
+        "max_area": app_state.analysis.max_area,
         "min_circularity": app_state.analysis.min_circularity,
         "batch_sampling_rate": app_state.analysis.batch_sampling_rate,
         "named_areas": named_areas,

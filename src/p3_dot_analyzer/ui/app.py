@@ -10,7 +10,7 @@ from ..named_areas import update_areas_list
 from ..render import render
 from ..services.analysis_service import run_batch_analysis
 from ..settings_io import schedule_settings_save
-from ..ui_helpers import update_color_display, update_status, render_frame
+from ..ui_helpers import update_status, render_frame
 from .analysis_panel import build_analysis_controls, show_batch_results_chart
 from .areas_panel import build_named_areas_controls
 from .events import create_mouse_handlers, make_on_image_loaded_callback
@@ -49,9 +49,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             user_data.areas.interaction_mode = "view"
             user_data.areas.drag_start = None
             dpg.configure_item(user_data.areas.mode_button_tag, label="Create Area")
-            update_status(
-                user_data, "View mode: click on image to select a temperature"
-            )
+            update_status(user_data, "View mode: click on image to select a base point")
             # Remove preview rectangle if exists
             if dpg.does_item_exist(user_data.areas.preview_rect_tag):
                 dpg.delete_item(user_data.areas.preview_rect_tag)
@@ -63,10 +61,10 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         if app_data:
             update_status(app_state, "Analysis mode enabled - detecting marks...")
             on_areas_changed(app_state)
-            if app_state.analysis.selected_temp is None:
+            if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
                 update_status(
                     app_state,
-                    "Analysis mode enabled - click on image to select a temperature",
+                    "Analysis mode enabled - click on image to select a base point",
                 )
             else:
                 mark_count = sum(app_state.analysis.area_mark_counts.values())
@@ -87,6 +85,12 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     def on_min_area_change(_sender: int, app_data: int) -> None:
         """Handle min area input change."""
         app_state.analysis.min_area = max(10, min(5000, int(app_data)))
+        schedule_settings_save(app_state)
+        on_areas_changed(app_state)
+
+    def on_max_area_change(_sender: int, app_data: int) -> None:
+        """Handle max area input change."""
+        app_state.analysis.max_area = max(10, min(5000, int(app_data)))
         schedule_settings_save(app_state)
         on_areas_changed(app_state)
 
@@ -154,7 +158,6 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         normalize_render_range()
         schedule_settings_save(app_state)
         apply_render_config()
-        update_color_display(app_state)
         if app_state.analysis.enabled:
             on_areas_changed(app_state)
 
@@ -163,7 +166,6 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         normalize_render_range()
         schedule_settings_save(app_state)
         apply_render_config()
-        update_color_display(app_state)
         if app_state.analysis.enabled:
             on_areas_changed(app_state)
 
@@ -173,7 +175,6 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
             app_state.render.colormap = mapping[app_data]
             schedule_settings_save(app_state)
             apply_render_config()
-            update_color_display(app_state)
             if app_state.analysis.enabled:
                 on_areas_changed(app_state)
 
@@ -191,9 +192,9 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     def on_batch_analyze_clicked(_sender: int, _app_data: None) -> None:
         """Handle batch analysis button click."""
         # Validate prerequisites
-        if app_state.analysis.selected_temp is None:
+        if app_state.analysis.base_x is None or app_state.analysis.base_y is None:
             update_status(
-                app_state, "Please select a temperature first (click on image)"
+                app_state, "Please select a base point first (click on image)"
             )
             return
 
@@ -361,24 +362,6 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     tag=app_state.recording.frame_text_tag,
                                 )
 
-                                # Color picker display
-                                dpg.add_separator()
-                                dpg.add_text("Selected Temperature:")
-                                with dpg.drawlist(
-                                    width=60, height=30, tag="color_swatch_drawlist"
-                                ):
-                                    dpg.draw_rectangle(
-                                        pmin=(0, 0),
-                                        pmax=(60, 30),
-                                        fill=(128, 128, 128, 255),
-                                        color=(200, 200, 200, 255),
-                                        tag=app_state.ui.color_swatch_tag,
-                                    )
-                                dpg.add_text(
-                                    "No temperature selected",
-                                    tag=app_state.ui.color_text_tag,
-                                )
-
                                 build_named_areas_controls(
                                     app_state, on_mode_button_clicked
                                 )
@@ -387,6 +370,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                     on_analysis_toggle,
                                     on_tolerance_change,
                                     on_min_area_change,
+                                    on_max_area_change,
                                     on_min_circularity_change,
                                     on_sampling_rate_change,
                                     on_batch_analyze_clicked,
