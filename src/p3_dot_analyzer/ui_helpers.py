@@ -58,9 +58,16 @@ def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
     if app_state.render.current_frame is None:
         return None
 
+    return get_temp_at_img(app_state, app_state.render.current_frame, img_x, img_y)
+
+
+def get_temp_at_img(
+    app_state: AppState, frame: CamFrame, img_x: int, img_y: int
+) -> float | None:
+    """Get the temperature at the given image coordinates."""
     # Bounds check
-    h = app_state.render.current_frame.height
-    w = app_state.render.current_frame.width
+    h = frame.height
+    w = frame.width
     if img_x < 0 or img_x >= w or img_y < 0 or img_y >= h:
         return None
 
@@ -73,7 +80,7 @@ def get_temp_at(app_state: AppState, img_x: int, img_y: int) -> float | None:
     )
     return float(
         raw_to_celsius_corrected(
-            float(app_state.render.current_frame.raw_thermal[img_y, img_x]),
+            float(frame.raw_thermal[img_y, img_x]),
             env,
         )
     )

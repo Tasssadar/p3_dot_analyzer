@@ -42,8 +42,16 @@ class SettingsData(TypedDict, total=False):
 
 
 @dataclass(slots=True)
+class AreaPStatPoint:
+    timestamp: float
+    base_temp_c: float
+    count: int
+
+
+@dataclass(slots=True)
 class BatchAnalysisResult:
     """Results from batch analysis of all images."""
 
     timestamps: list[float]  # seconds since start
     area_counts: dict[str, list[int]]  # area_name -> counts at each timestamp
+    percentile_for_area: dict[int, dict[str, AreaPStatPoint]]

@@ -9,11 +9,15 @@ import time
 import cv2
 import numpy as np
 
-from ..models import BatchAnalysisResult, NamedArea
+from ..ui_helpers import get_temp_at_img
+
+from ..models import BatchAnalysisResult, NamedArea, AreaPStatPoint
 from ..state import AppState
 
+WANTED_PERCENTILES = [90, 50, 10]
 
-@dataclass
+
+@dataclass(slots=True)
 class DetectedMark:
     """A detected circular or elliptical mark."""
 
@@ -201,10 +205,18 @@ def analyze_current_frame(
     return marks, counts
 
 
+@dataclass(slots=True)
+class _LoadAndDetectResult:
+    image_index: int
+    timestamp: float
+    marks: list[DetectedMark] | None
+    base_temp_c: float
+
+
 def _load_and_detect(
     app_state: AppState,
     image_index: int,
-) -> tuple[int, float, list[DetectedMark] | None]:
+) -> _LoadAndDetectResult:
     assert app_state.recording.reader is not None
     # Load image
     frame = app_state.recording.reader.read_frame(
@@ -212,18 +224,10 @@ def _load_and_detect(
     )
 
     if frame is None:
-        # If image fails to load, record zeros
-        return (image_index, 0, None)
+        raise RuntimeError(f"Failed to load frame {image_index}")
 
     assert app_state.analysis.base_x is not None
     assert app_state.analysis.base_y is not None
-    if (
-        app_state.analysis.base_x < 0
-        or app_state.analysis.base_y < 0
-        or app_state.analysis.base_x >= frame.width
-        or app_state.analysis.base_y >= frame.height
-    ):
-        return (image_index, frame.ts, None)
 
     # Detect marks
     marks = detect_colored_marks(
@@ -235,7 +239,24 @@ def _load_and_detect(
         max_area=app_state.analysis.max_area,
         min_circularity=app_state.analysis.min_circularity,
     )
-    return (image_index, frame.ts, marks)
+    base_temp = get_temp_at_img(
+        app_state, frame, app_state.analysis.base_x, app_state.analysis.base_y
+    )
+    assert base_temp is not None
+
+    return _LoadAndDetectResult(
+        image_index=image_index,
+        timestamp=frame.ts,
+        marks=marks,
+        base_temp_c=base_temp,
+    )
+
+
+@dataclass(slots=True)
+class _BatchPoint:
+    timestamp: float
+    base_temp_c: float
+    area_counts: dict[str, int]
 
 
 def run_batch_analysis(
@@ -257,9 +278,9 @@ def run_batch_analysis(
     sampling_rate = max(1, min(100, app_state.analysis.batch_sampling_rate))
 
     # Initialize result storage
-    timestamps: list[float] = []
-    area_counts: dict[str, list[int]] = {
-        area.name: [] for area in app_state.areas.named_areas
+    points: list[_BatchPoint] = []
+    area_max_counts: dict[str, int] = {
+        area.name: 0 for area in app_state.areas.named_areas
     }
 
     # Get indices to process based on sampling
@@ -276,7 +297,7 @@ def run_batch_analysis(
         progress_idx = 0
         start_ts = reader.ts_start.timestamp()
         for fut in as_completed(futures):
-            _image_index, timestamp, marks = fut.result()
+            r = fut.result()
             progress_idx += 1
 
             # Report progress
@@ -286,22 +307,76 @@ def run_batch_analysis(
                 if progress_callback is not None:
                     progress_callback(progress_idx, total)
 
-            timestamps.append(timestamp - start_ts)
+            if r.marks is None:
+                counts = {area.name: 0 for area in app_state.areas.named_areas}
+            else:
+                # Count marks in areas
+                counts = count_marks_in_areas(r.marks, app_state.areas.named_areas)
 
-            if marks is None:
-                for area_name in area_counts:
-                    area_counts[area_name].append(0)
+                for area_name, c in counts.items():
+                    if c > area_max_counts[area_name]:
+                        area_max_counts[area_name] = c
+
+            points.append(
+                _BatchPoint(
+                    timestamp=r.timestamp - start_ts,
+                    area_counts=counts,
+                    base_temp_c=r.base_temp_c,
+                )
+            )
+
+    points.sort(key=lambda p: p.timestamp)
+
+    timestamps = [p.timestamp for p in points]
+
+    area_counts_res: dict[str, list[int]] = {
+        area.name: [] for area in app_state.areas.named_areas
+    }
+    area_min_counts = area_max_counts.copy()
+
+    percentiles_stack = {
+        area.name: list(WANTED_PERCENTILES) for area in app_state.areas.named_areas
+    }
+
+    percentile_for_area: dict[int, dict[str, AreaPStatPoint]] = {
+        pct: {} for pct in WANTED_PERCENTILES
+    }
+
+    for p in points:
+        for area_name, c in p.area_counts.items():
+            amax = area_max_counts[area_name]
+            if amax == 0:
+                area_counts_res[area_name].append(0)
                 continue
 
-            # Count marks in areas
-            counts = count_marks_in_areas(marks, app_state.areas.named_areas)
+            amin = area_min_counts[area_name]
+            cur = amax - c
+            if cur < amin:
+                area_min_counts[area_name] = cur
+            else:
+                cur = amin
 
-            # Store counts for each area
-            for area in app_state.areas.named_areas:
-                area_counts[area.name].append(counts.get(area.name, 0))
+            cur_pct = int(cur / amax * 100)
+
+            pct_stack_for_area = percentiles_stack[area_name]
+            while pct_stack_for_area and cur_pct <= pct_stack_for_area[0]:
+                pct = pct_stack_for_area.pop(0)
+                percentile_for_area[pct][area_name] = AreaPStatPoint(
+                    p.timestamp, p.base_temp_c, c
+                )
+
+            area_counts_res[area_name].append(cur_pct)
+
+    for pct, areas in percentile_for_area.items():
+        print(f"{pct}% remaining:")
+        for area_name, ps in areas.items():
+            print(
+                f"  {area_name}: {ps.count} at {ps.timestamp:.2f}s, {ps.base_temp_c:.2f} °C"
+            )
 
     # Store result
     app_state.analysis.batch_result = BatchAnalysisResult(
         timestamps=timestamps,
-        area_counts=area_counts,
+        area_counts=area_counts_res,
+        percentile_for_area=percentile_for_area,
     )
