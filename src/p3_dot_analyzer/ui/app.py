@@ -233,7 +233,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                 f"Batch analysis complete: {len(app_state.analysis.batch_result.timestamps)} samples",
             )
             show_batch_results_chart(app_state)
-            update_percentile_table(app_state)
+            update_percentile_table(app_state, on_image_loaded)
         else:
             update_status(app_state, "Batch analysis failed")
 

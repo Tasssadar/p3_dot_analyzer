@@ -301,6 +301,7 @@ class _BatchPoint:
     timestamp: float
     base_temp_c: float
     area_counts: dict[str, int]
+    image_index: int
 
 
 def _collect_batch_points(
@@ -392,6 +393,7 @@ def _collect_batch_points(
                 timestamp=r.timestamp - start_ts,
                 area_counts=counts,
                 base_temp_c=r.base_temp_c,
+                image_index=r.image_index,
             )
         )
 
@@ -436,7 +438,7 @@ def _build_batch_result(
             while pct_stack_for_area and cur_pct >= pct_stack_for_area[0]:
                 pct = pct_stack_for_area.pop(0)
                 percentile_for_area[pct][area_name] = AreaPStatPoint(
-                    p.timestamp, p.base_temp_c, cur, amax
+                    p.timestamp, p.base_temp_c, cur, amax, p.image_index
                 )
 
             area_counts_res[area_name].append(cur_pct)

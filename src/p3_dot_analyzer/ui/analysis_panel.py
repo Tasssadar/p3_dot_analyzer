@@ -6,6 +6,7 @@ import dearpygui.dearpygui as dpg  # type: ignore
 
 from ..constants import AREA_COLORS_RGB
 from ..state import AppState
+from .recording_panel import render_recording_frame
 
 
 def create_line_theme(color: tuple[int, int, int]) -> int:
@@ -77,7 +78,10 @@ def build_percentile_table(state: AppState) -> None:
         dpg.add_text("Run batch analysis to see percentile stats.")
 
 
-def update_percentile_table(state: AppState) -> None:
+def update_percentile_table(
+    state: AppState,
+    on_image_loaded: Callable[[AppState], None] | None = None,
+) -> None:
     if not dpg.does_item_exist(state.analysis.batch_percentile_container_tag):
         return
 
@@ -97,6 +101,11 @@ def update_percentile_table(state: AppState) -> None:
             parent=state.analysis.batch_percentile_container_tag,
         )
         return
+
+    def on_view_clicked(_sender: int, _app_data: None, user_data: int) -> None:
+        if state.recording.reader is None or state.recording.frame_count <= 0:
+            return
+        render_recording_frame(state, user_data, on_image_loaded)
 
     with dpg.table(
         tag=state.analysis.batch_percentile_table_tag,
@@ -125,9 +134,19 @@ def update_percentile_table(state: AppState) -> None:
                     if ps is None:
                         dpg.add_text("--")
                     else:
-                        dpg.add_text(
-                            f"{ps.timestamp:6.2f}s   {ps.base_temp_c:4.2f} °C    {ps.count_cur:2} / {ps.count_max:2} frozen"
-                        )
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(f"{ps.timestamp:6.2f}s")
+                            dpg.add_button(
+                                label="View",
+                                callback=on_view_clicked,
+                                user_data=ps.frame_index,
+                                enabled=state.recording.reader is not None
+                                and state.recording.frame_count > 0,
+                                width=45,
+                            )
+                            dpg.add_text(
+                                f"{ps.base_temp_c:4.2f} °C    {ps.count_cur:2} / {ps.count_max:2} frozen"
+                            )
 
 
 def build_analysis_controls(

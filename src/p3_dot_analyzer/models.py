@@ -50,6 +50,7 @@ class AreaPStatPoint:
     base_temp_c: float
     count_cur: int
     count_max: int
+    frame_index: int
 
 
 @dataclass(slots=True)
