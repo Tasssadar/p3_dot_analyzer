@@ -32,6 +32,8 @@ class DetectedMark:
 
 @dataclass(slots=True)
 class _TrackedMark:
+    id: int
+    mark: DetectedMark
     bbox: tuple[float, float, float, float]
     last_seen_frame: int
 
@@ -213,6 +215,33 @@ def count_marks_in_areas(
     return counts
 
 
+def find_marks_in_areas(
+    marks: list[_TrackedMark],
+    named_areas: list[NamedArea],
+) -> dict[str, list[_TrackedMark]]:
+    """Count how many marks overlap with each named area."""
+    counts: dict[str, list[_TrackedMark]] = {}
+
+    for area in named_areas:
+        marks_in_area: list[_TrackedMark] = []
+        area_x1 = area.x
+        area_y1 = area.y
+        area_x2 = area.x + area.width
+        area_y2 = area.y + area.height
+
+        for mark in marks:
+            # Check if mark center is within the area bounds
+            if (
+                area_x1 <= mark.mark.center_x <= area_x2
+                and area_y1 <= mark.mark.center_y <= area_y2
+            ):
+                marks_in_area.append(mark)
+
+        counts[area.name] = marks_in_area
+
+    return counts
+
+
 def analyze_current_frame(
     app_state: AppState,
 ) -> tuple[list[DetectedMark], dict[str, int]] | None:
@@ -300,7 +329,7 @@ def _load_and_detect(
 class _BatchPoint:
     timestamp: float
     base_temp_c: float
-    area_counts: dict[str, int]
+    marks_in_areas: dict[str, list[_TrackedMark]]
     image_index: int
 
 
@@ -308,11 +337,8 @@ def _build_batch_points_from_results(
     app_state: AppState,
     results: list[_LoadAndDetectResult],
     start_ts: float,
-) -> tuple[list[_BatchPoint], dict[str, int]]:
+) -> list[_BatchPoint]:
     points: list[_BatchPoint] = []
-    area_max_counts: dict[str, int] = {
-        area.name: 0 for area in app_state.areas.named_areas
-    }
     active_marks: list[_TrackedMark] = []
     retired_bboxes: list[tuple[float, float, float, float]] = []
 
@@ -320,7 +346,7 @@ def _build_batch_points_from_results(
 
     for frame_idx, r in enumerate(results):
         marks = r.marks or []
-        filtered_marks: list[DetectedMark] = []
+        filtered_marks: list[_TrackedMark] = []
         matched_active: set[int] = set()
 
         for mark in marks:
@@ -340,18 +366,22 @@ def _build_batch_points_from_results(
                     best_ratio = ratio
                     best_idx = idx
 
-            if best_idx >= 0 and best_ratio > 0.6:
-                active_marks[best_idx].bbox = bbox
-                active_marks[best_idx].last_seen_frame = frame_idx
+            if best_idx >= 0 and best_ratio > 0.4:
+                tm = active_marks[best_idx]
+                tm.mark = mark
+                tm.bbox = bbox
+                tm.last_seen_frame = frame_idx
                 matched_active.add(best_idx)
-                filtered_marks.append(mark)
             else:
-                active_marks.append(_TrackedMark(bbox=bbox, last_seen_frame=frame_idx))
-                filtered_marks.append(mark)
+                tm = _TrackedMark(
+                    id=len(active_marks),
+                    mark=mark,
+                    bbox=bbox,
+                    last_seen_frame=frame_idx,
+                )
+                active_marks.append(tm)
 
-                counts = count_marks_in_areas([mark], app_state.areas.named_areas)
-                for area_name, c in counts.items():
-                    area_max_counts[area_name] += c
+            filtered_marks.append(tm)
 
         if active_marks:
             still_active: list[_TrackedMark] = []
@@ -362,12 +392,14 @@ def _build_batch_points_from_results(
                     still_active.append(tracked)
             active_marks = still_active
 
-        counts = count_marks_in_areas(filtered_marks, app_state.areas.named_areas)
+        marks_in_areas = find_marks_in_areas(
+            filtered_marks, app_state.areas.named_areas
+        )
 
         points.append(
             _BatchPoint(
                 timestamp=r.timestamp - start_ts,
-                area_counts=counts,
+                marks_in_areas=marks_in_areas,
                 base_temp_c=r.base_temp_c,
                 image_index=r.image_index,
             )
@@ -375,7 +407,7 @@ def _build_batch_points_from_results(
 
     points.sort(key=lambda p: p.timestamp)
 
-    return points, area_max_counts
+    return points
 
 
 def _collect_batch_points(
@@ -383,7 +415,7 @@ def _collect_batch_points(
     reader: RecordingReader,
     sampling_rate: int,
     progress_callback: Callable[[int, int], None] | None,
-) -> tuple[list[_BatchPoint], dict[str, int]]:
+) -> list[_BatchPoint]:
     results: list[_LoadAndDetectResult] = []
 
     indices_to_process = list(range(0, reader.frame_count, sampling_rate))
@@ -413,15 +445,34 @@ def _collect_batch_points(
     return _build_batch_points_from_results(app_state, results, start_ts)
 
 
+def _get_area_max_counts(
+    points: list[_BatchPoint],
+    named_areas: list[NamedArea],
+) -> dict[str, int]:
+    mark_ids_in_area: dict[str, set[int]] = {area.name: set() for area in named_areas}
+    area_max_counts: dict[str, int] = {area.name: 0 for area in named_areas}
+    for p in points:
+        for area_name, marks in p.marks_in_areas.items():
+            area_ids = mark_ids_in_area[area_name]
+            area_ids.update(mark.id for mark in marks)
+
+            amax = area_max_counts[area_name]
+            if len(area_ids) > amax:
+                amax = len(area_ids)
+                area_max_counts[area_name] = amax
+    return area_max_counts
+
+
 def _build_batch_result(
     points: list[_BatchPoint],
-    area_max_counts: dict[str, int],
     named_areas: list[NamedArea],
 ) -> BatchAnalysisResult:
     timestamps = [p.timestamp for p in points]
 
+    area_max_counts = _get_area_max_counts(points, named_areas)
+
     area_counts_res: dict[str, list[int]] = {area.name: [] for area in named_areas}
-    max_so_far = {area.name: 0 for area in named_areas}
+    mark_ids_in_area: dict[str, set[int]] = {area.name: set() for area in named_areas}
 
     percentiles_stack = {area.name: list(WANTED_PERCENTILES) for area in named_areas}
 
@@ -430,18 +481,15 @@ def _build_batch_result(
     }
 
     for p in points:
-        for area_name, c in p.area_counts.items():
+        for area_name, marks in p.marks_in_areas.items():
             amax = area_max_counts[area_name]
             if amax == 0:
                 area_counts_res[area_name].append(0)
                 continue
 
-            max_area_so_far = max_so_far[area_name]
-            if c > max_area_so_far:
-                max_so_far[area_name] = c
-                cur = c
-            else:
-                cur = max_area_so_far
+            area_ids = mark_ids_in_area[area_name]
+            area_ids.update(mark.id for mark in marks)
+            cur = len(area_ids)
 
             cur_pct = int(cur / amax * 100)
 
@@ -478,7 +526,7 @@ def run_batch_analysis(
         return
 
     sampling_rate = max(1, min(100, app_state.analysis.batch_sampling_rate))
-    points, area_max_counts = _collect_batch_points(
+    points = _collect_batch_points(
         app_state,
         reader,
         sampling_rate,
@@ -486,6 +534,5 @@ def run_batch_analysis(
     )
     app_state.analysis.batch_result = _build_batch_result(
         points,
-        area_max_counts,
         app_state.areas.named_areas,
     )
