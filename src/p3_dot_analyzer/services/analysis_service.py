@@ -349,6 +349,10 @@ def _build_batch_points_from_results(
                 active_marks.append(_TrackedMark(bbox=bbox, last_seen_frame=frame_idx))
                 filtered_marks.append(mark)
 
+                counts = count_marks_in_areas([mark], app_state.areas.named_areas)
+                for area_name, c in counts.items():
+                    area_max_counts[area_name] += c
+
         if active_marks:
             still_active: list[_TrackedMark] = []
             for tracked in active_marks:
@@ -359,9 +363,6 @@ def _build_batch_points_from_results(
             active_marks = still_active
 
         counts = count_marks_in_areas(filtered_marks, app_state.areas.named_areas)
-        for area_name, c in counts.items():
-            if c > area_max_counts[area_name]:
-                area_max_counts[area_name] = c
 
         points.append(
             _BatchPoint(
