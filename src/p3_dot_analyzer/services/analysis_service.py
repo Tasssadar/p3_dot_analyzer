@@ -17,6 +17,8 @@ from ..models import BatchAnalysisResult, NamedArea, AreaPStatPoint
 from ..state import AppState
 
 WANTED_PERCENTILES = [10, 50, 90]
+MATCH_OVERLAP_THRESHOLD = 0.6
+RETIREMENT_FRAME_GAP = 3
 
 
 @dataclass(slots=True)
@@ -344,17 +346,18 @@ def _build_batch_points_from_results(
 
     results.sort(key=lambda r: r.timestamp, reverse=True)
 
-    tm_id = 0
+    next_mark_id = 0
 
-    for frame_idx, r in enumerate(results):
-        marks = r.marks or []
-        filtered_marks: list[_TrackedMark] = []
+    for frame_idx, result in enumerate(results):
+        marks = result.marks or []
+        frame_marks: list[_TrackedMark] = []
         matched_active: set[int] = set()
 
         for mark in marks:
             bbox = _mark_bbox(mark)
             if any(
-                _bbox_overlap_ratio(bbox, retired) > 0.6 for retired in retired_bboxes
+                _bbox_overlap_ratio(bbox, retired) > MATCH_OVERLAP_THRESHOLD
+                for retired in retired_bboxes
             ):
                 continue
 
@@ -368,43 +371,41 @@ def _build_batch_points_from_results(
                     best_ratio = ratio
                     best_idx = idx
 
-            if best_idx >= 0 and best_ratio > 0.6:
-                tm = active_marks[best_idx]
-                tm.mark = mark
-                tm.bbox = bbox
-                tm.last_seen_frame = frame_idx
+            if best_idx >= 0 and best_ratio > MATCH_OVERLAP_THRESHOLD:
+                tracked = active_marks[best_idx]
+                tracked.mark = mark
+                tracked.bbox = bbox
+                tracked.last_seen_frame = frame_idx
                 matched_active.add(best_idx)
             else:
-                tm = _TrackedMark(
-                    id=tm_id,
+                tracked = _TrackedMark(
+                    id=next_mark_id,
                     mark=mark,
                     bbox=bbox,
                     last_seen_frame=frame_idx,
                 )
-                tm_id += 1
-                active_marks.append(tm)
+                next_mark_id += 1
+                active_marks.append(tracked)
 
-            filtered_marks.append(tm)
+            frame_marks.append(tracked)
 
         if active_marks:
             still_active: list[_TrackedMark] = []
             for tracked in active_marks:
-                if frame_idx - tracked.last_seen_frame > 3:
+                if frame_idx - tracked.last_seen_frame > RETIREMENT_FRAME_GAP:
                     retired_bboxes.append(tracked.bbox)
                 else:
                     still_active.append(tracked)
             active_marks = still_active
 
-        marks_in_areas = find_marks_in_areas(
-            filtered_marks, app_state.areas.named_areas
-        )
+        marks_in_areas = find_marks_in_areas(frame_marks, app_state.areas.named_areas)
 
         points.append(
             _BatchPoint(
-                timestamp=r.timestamp - start_ts,
+                timestamp=result.timestamp - start_ts,
                 marks_in_areas=marks_in_areas,
-                base_temp_c=r.base_temp_c,
-                image_index=r.image_index,
+                base_temp_c=result.base_temp_c,
+                image_index=result.image_index,
             )
         )
 
@@ -434,7 +435,7 @@ def _collect_batch_points(
         progress_idx = 0
         start_ts = reader.ts_start.timestamp()
         for fut in as_completed(futures):
-            r = fut.result()
+            result = fut.result()
             progress_idx += 1
 
             now = time.monotonic()
@@ -443,26 +444,9 @@ def _collect_batch_points(
                 if progress_callback is not None:
                     progress_callback(progress_idx, total)
 
-            results.append(r)
+            results.append(result)
 
     return _build_batch_points_from_results(app_state, results, start_ts)
-
-
-def _get_area_max_counts(
-    points: list[_BatchPoint],
-    named_areas: list[NamedArea],
-) -> dict[str, int]:
-    mark_ids_in_area: dict[str, set[int]] = {area.name: set() for area in named_areas}
-    area_max_counts: dict[str, int] = {area.name: 0 for area in named_areas}
-    for p in points:
-        for area_name, marks in p.marks_in_areas.items():
-            area_ids = mark_ids_in_area[area_name]
-            area_ids.update(mark.id for mark in marks)
-
-            count = len(area_ids)
-            if count > area_max_counts[area_name]:
-                area_max_counts[area_name] = count
-    return area_max_counts
 
 
 def _build_batch_result(
@@ -471,42 +455,55 @@ def _build_batch_result(
 ) -> BatchAnalysisResult:
     timestamps = [p.timestamp for p in points]
 
-    area_max_counts = _get_area_max_counts(points, named_areas)
-
-    area_counts_res: dict[str, list[int]] = {area.name: [] for area in named_areas}
-    mark_ids_in_area: dict[str, set[int]] = {area.name: set() for area in named_areas}
-
-    percentiles_stack = {area.name: list(WANTED_PERCENTILES) for area in named_areas}
-
+    running_ids: dict[str, set[int]] = {area.name: set() for area in named_areas}
+    running_counts: dict[str, list[int]] = {area.name: [] for area in named_areas}
     percentile_for_area: dict[int, dict[str, AreaPStatPoint]] = {
         pct: {} for pct in WANTED_PERCENTILES
     }
 
-    for p in points:
-        for area_name, marks in p.marks_in_areas.items():
-            amax = area_max_counts[area_name]
-            if amax == 0:
-                area_counts_res[area_name].append(0)
+    for point in points:
+        for area in named_areas:
+            area_name = area.name
+            running_ids[area_name].update(
+                mark.id for mark in point.marks_in_areas[area_name]
+            )
+            running_counts[area_name].append(len(running_ids[area_name]))
+
+    area_pct_series: dict[str, list[int]] = {}
+    for area in named_areas:
+        area_name = area.name
+        max_count = running_counts[area_name][-1] if running_counts[area_name] else 0
+        pct_series: list[int] = []
+        pct_idx = 0
+
+        for idx, point in enumerate(points):
+            if max_count == 0:
+                pct_series.append(0)
                 continue
 
-            area_ids = mark_ids_in_area[area_name]
-            area_ids.update(mark.id for mark in marks)
-            cur = len(area_ids)
+            running_count = running_counts[area_name][idx]
+            current_pct = int(running_count / max_count * 100)
+            pct_series.append(current_pct)
 
-            cur_pct = int(cur / amax * 100)
-
-            pct_stack_for_area = percentiles_stack[area_name]
-            while pct_stack_for_area and cur_pct >= pct_stack_for_area[0]:
-                pct = pct_stack_for_area.pop(0)
+            while (
+                pct_idx < len(WANTED_PERCENTILES)
+                and current_pct >= WANTED_PERCENTILES[pct_idx]
+            ):
+                pct = WANTED_PERCENTILES[pct_idx]
                 percentile_for_area[pct][area_name] = AreaPStatPoint(
-                    p.timestamp, p.base_temp_c, cur, amax, p.image_index
+                    point.timestamp,
+                    point.base_temp_c,
+                    running_count,
+                    max_count,
+                    point.image_index,
                 )
+                pct_idx += 1
 
-            area_counts_res[area_name].append(cur_pct)
+        area_pct_series[area_name] = pct_series
 
     return BatchAnalysisResult(
         timestamps=timestamps,
-        area_counts=area_counts_res,
+        area_counts=area_pct_series,
         percentile_for_area=percentile_for_area,
     )
 
