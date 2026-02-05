@@ -48,7 +48,8 @@ class SettingsData(TypedDict, total=False):
 class AreaPStatPoint:
     timestamp: float
     base_temp_c: float
-    count: int
+    count_cur: int
+    count_max: int
 
 
 @dataclass(slots=True)

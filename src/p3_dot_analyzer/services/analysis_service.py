@@ -16,7 +16,7 @@ from ..ui_helpers import get_temp_at_img
 from ..models import BatchAnalysisResult, NamedArea, AreaPStatPoint
 from ..state import AppState
 
-WANTED_PERCENTILES = [90, 50, 10]
+WANTED_PERCENTILES = [10, 50, 90]
 
 
 @dataclass(slots=True)
@@ -28,6 +28,48 @@ class DetectedMark:
     axis_a: float  # semi-major axis
     axis_b: float  # semi-minor axis
     angle: float  # rotation angle in degrees
+
+
+@dataclass(slots=True)
+class _TrackedMark:
+    bbox: tuple[float, float, float, float]
+    last_seen_frame: int
+
+
+def _mark_bbox(mark: DetectedMark) -> tuple[float, float, float, float]:
+    return (
+        mark.center_x - mark.axis_a,
+        mark.center_y - mark.axis_b,
+        mark.center_x + mark.axis_a,
+        mark.center_y + mark.axis_b,
+    )
+
+
+def _bbox_overlap_ratio(
+    bbox_a: tuple[float, float, float, float],
+    bbox_b: tuple[float, float, float, float],
+) -> float:
+    ax1, ay1, ax2, ay2 = bbox_a
+    bx1, by1, bx2, by2 = bbox_b
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = inter_x2 - inter_x1
+    inter_h = inter_y2 - inter_y1
+    if inter_w <= 0 or inter_h <= 0:
+        return 0.0
+
+    inter_area = inter_w * inter_h
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    denom = min(area_a, area_b)
+    if denom <= 0:
+        return 0.0
+
+    return inter_area / denom
 
 
 def detect_colored_marks(
@@ -271,6 +313,9 @@ def _collect_batch_points(
     area_max_counts: dict[str, int] = {
         area.name: 0 for area in app_state.areas.named_areas
     }
+    results: list[_LoadAndDetectResult] = []
+    active_marks: list[_TrackedMark] = []
+    retired_bboxes: list[tuple[float, float, float, float]] = []
 
     indices_to_process = list(range(0, reader.frame_count, sampling_rate))
     total = len(indices_to_process)
@@ -294,24 +339,64 @@ def _collect_batch_points(
                 if progress_callback is not None:
                     progress_callback(progress_idx, total)
 
-            if r.marks is None:
-                counts = {area.name: 0 for area in app_state.areas.named_areas}
+            results.append(r)
+
+    results.sort(key=lambda r: r.timestamp, reverse=True)
+    for frame_idx, r in enumerate(results):
+        marks = r.marks or []
+        filtered_marks: list[DetectedMark] = []
+        matched_active: set[int] = set()
+
+        for mark in marks:
+            bbox = _mark_bbox(mark)
+            if any(
+                _bbox_overlap_ratio(bbox, retired) > 0.4 for retired in retired_bboxes
+            ):
+                continue
+
+            best_idx = -1
+            best_ratio = 0.0
+            for idx, tracked in enumerate(active_marks):
+                if idx in matched_active:
+                    continue
+                ratio = _bbox_overlap_ratio(bbox, tracked.bbox)
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_idx = idx
+
+            if best_idx >= 0 and best_ratio > 0.6:
+                active_marks[best_idx].bbox = bbox
+                active_marks[best_idx].last_seen_frame = frame_idx
+                matched_active.add(best_idx)
+                filtered_marks.append(mark)
             else:
-                counts = count_marks_in_areas(r.marks, app_state.areas.named_areas)
+                active_marks.append(_TrackedMark(bbox=bbox, last_seen_frame=frame_idx))
+                filtered_marks.append(mark)
 
-                for area_name, c in counts.items():
-                    if c > area_max_counts[area_name]:
-                        area_max_counts[area_name] = c
+        if active_marks:
+            still_active: list[_TrackedMark] = []
+            for tracked in active_marks:
+                if frame_idx - tracked.last_seen_frame > 3:
+                    retired_bboxes.append(tracked.bbox)
+                else:
+                    still_active.append(tracked)
+            active_marks = still_active
 
-            points.append(
-                _BatchPoint(
-                    timestamp=r.timestamp - start_ts,
-                    area_counts=counts,
-                    base_temp_c=r.base_temp_c,
-                )
+        counts = count_marks_in_areas(filtered_marks, app_state.areas.named_areas)
+        for area_name, c in counts.items():
+            if c > area_max_counts[area_name]:
+                area_max_counts[area_name] = c
+
+        points.append(
+            _BatchPoint(
+                timestamp=r.timestamp - start_ts,
+                area_counts=counts,
+                base_temp_c=r.base_temp_c,
             )
+        )
 
     points.sort(key=lambda p: p.timestamp)
+
     return points, area_max_counts
 
 
@@ -323,7 +408,7 @@ def _build_batch_result(
     timestamps = [p.timestamp for p in points]
 
     area_counts_res: dict[str, list[int]] = {area.name: [] for area in named_areas}
-    area_min_counts = area_max_counts.copy()
+    max_so_far = {area.name: 0 for area in named_areas}
 
     percentiles_stack = {area.name: list(WANTED_PERCENTILES) for area in named_areas}
 
@@ -338,20 +423,20 @@ def _build_batch_result(
                 area_counts_res[area_name].append(0)
                 continue
 
-            amin = area_min_counts[area_name]
-            cur = amax - c
-            if cur < amin:
-                area_min_counts[area_name] = cur
+            max_area_so_far = max_so_far[area_name]
+            if c > max_area_so_far:
+                max_so_far[area_name] = c
+                cur = c
             else:
-                cur = amin
+                cur = max_area_so_far
 
             cur_pct = int(cur / amax * 100)
 
             pct_stack_for_area = percentiles_stack[area_name]
-            while pct_stack_for_area and cur_pct <= pct_stack_for_area[0]:
+            while pct_stack_for_area and cur_pct >= pct_stack_for_area[0]:
                 pct = pct_stack_for_area.pop(0)
                 percentile_for_area[pct][area_name] = AreaPStatPoint(
-                    p.timestamp, p.base_temp_c, cur
+                    p.timestamp, p.base_temp_c, cur, amax
                 )
 
             area_counts_res[area_name].append(cur_pct)

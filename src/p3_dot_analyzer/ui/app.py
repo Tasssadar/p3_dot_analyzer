@@ -243,7 +243,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         focused_item = dpg.get_focused_item()
         if focused_item is None or not dpg.does_item_exist(focused_item):
             return None
-        return dpg.get_item_type(focused_item)
+        return dpg.get_item_type(focused_item)  # type: ignore
 
     def on_key_press(_sender: int, app_data: int) -> None:
         if app_state.ui.active_tab != "analysis_tab":
@@ -428,7 +428,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
                                 )
                         dpg.add_separator()
                         dpg.add_text(
-                            "Percentile Stats (90% == 90% of dots still remain unfrozen)"
+                            "Percentile Stats (10% == 10% of dots still is frozen)"
                         )
                         build_percentile_table(app_state)
 

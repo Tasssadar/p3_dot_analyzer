@@ -90,9 +90,7 @@ def update_percentile_table(state: AppState) -> None:
         )
         return
 
-    percentiles = sorted(
-        state.analysis.batch_result.percentile_for_area.keys(), reverse=True
-    )
+    percentiles = sorted(state.analysis.batch_result.percentile_for_area.keys())
     if not percentiles:
         dpg.add_text(
             "No percentile data available.",
@@ -128,7 +126,7 @@ def update_percentile_table(state: AppState) -> None:
                         dpg.add_text("--")
                     else:
                         dpg.add_text(
-                            f"{ps.timestamp:6.2f}s   {ps.base_temp_c:4.2f} °C    {ps.count:4} unfrozen"
+                            f"{ps.timestamp:6.2f}s   {ps.base_temp_c:4.2f} °C    {ps.count_cur:2} / {ps.count_max:2} frozen"
                         )
 
 
