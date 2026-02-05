@@ -304,45 +304,20 @@ class _BatchPoint:
     image_index: int
 
 
-def _collect_batch_points(
+def _build_batch_points_from_results(
     app_state: AppState,
-    reader: RecordingReader,
-    sampling_rate: int,
-    progress_callback: Callable[[int, int], None] | None,
+    results: list[_LoadAndDetectResult],
+    start_ts: float,
 ) -> tuple[list[_BatchPoint], dict[str, int]]:
     points: list[_BatchPoint] = []
     area_max_counts: dict[str, int] = {
         area.name: 0 for area in app_state.areas.named_areas
     }
-    results: list[_LoadAndDetectResult] = []
     active_marks: list[_TrackedMark] = []
     retired_bboxes: list[tuple[float, float, float, float]] = []
 
-    indices_to_process = list(range(0, reader.frame_count, sampling_rate))
-    total = len(indices_to_process)
-
-    last_progress_time = 0.0
-
-    with ThreadPoolExecutor(max_workers=os.process_cpu_count()) as executor:
-        futures = [
-            executor.submit(_load_and_detect, app_state, i) for i in indices_to_process
-        ]
-
-        progress_idx = 0
-        start_ts = reader.ts_start.timestamp()
-        for fut in as_completed(futures):
-            r = fut.result()
-            progress_idx += 1
-
-            now = time.monotonic()
-            if now - last_progress_time > 0.3:
-                last_progress_time = now
-                if progress_callback is not None:
-                    progress_callback(progress_idx, total)
-
-            results.append(r)
-
     results.sort(key=lambda r: r.timestamp, reverse=True)
+
     for frame_idx, r in enumerate(results):
         marks = r.marks or []
         filtered_marks: list[DetectedMark] = []
@@ -400,6 +375,41 @@ def _collect_batch_points(
     points.sort(key=lambda p: p.timestamp)
 
     return points, area_max_counts
+
+
+def _collect_batch_points(
+    app_state: AppState,
+    reader: RecordingReader,
+    sampling_rate: int,
+    progress_callback: Callable[[int, int], None] | None,
+) -> tuple[list[_BatchPoint], dict[str, int]]:
+    results: list[_LoadAndDetectResult] = []
+
+    indices_to_process = list(range(0, reader.frame_count, sampling_rate))
+    total = len(indices_to_process)
+
+    last_progress_time = 0.0
+
+    with ThreadPoolExecutor(max_workers=os.process_cpu_count()) as executor:
+        futures = [
+            executor.submit(_load_and_detect, app_state, i) for i in indices_to_process
+        ]
+
+        progress_idx = 0
+        start_ts = reader.ts_start.timestamp()
+        for fut in as_completed(futures):
+            r = fut.result()
+            progress_idx += 1
+
+            now = time.monotonic()
+            if now - last_progress_time > 0.3:
+                last_progress_time = now
+                if progress_callback is not None:
+                    progress_callback(progress_idx, total)
+
+            results.append(r)
+
+    return _build_batch_points_from_results(app_state, results, start_ts)
 
 
 def _build_batch_result(
