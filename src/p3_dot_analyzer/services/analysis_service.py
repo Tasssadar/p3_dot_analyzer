@@ -344,6 +344,8 @@ def _build_batch_points_from_results(
 
     results.sort(key=lambda r: r.timestamp, reverse=True)
 
+    tm_id = 0
+
     for frame_idx, r in enumerate(results):
         marks = r.marks or []
         filtered_marks: list[_TrackedMark] = []
@@ -352,7 +354,7 @@ def _build_batch_points_from_results(
         for mark in marks:
             bbox = _mark_bbox(mark)
             if any(
-                _bbox_overlap_ratio(bbox, retired) > 0.4 for retired in retired_bboxes
+                _bbox_overlap_ratio(bbox, retired) > 0.6 for retired in retired_bboxes
             ):
                 continue
 
@@ -366,7 +368,7 @@ def _build_batch_points_from_results(
                     best_ratio = ratio
                     best_idx = idx
 
-            if best_idx >= 0 and best_ratio > 0.4:
+            if best_idx >= 0 and best_ratio > 0.6:
                 tm = active_marks[best_idx]
                 tm.mark = mark
                 tm.bbox = bbox
@@ -374,11 +376,12 @@ def _build_batch_points_from_results(
                 matched_active.add(best_idx)
             else:
                 tm = _TrackedMark(
-                    id=len(active_marks),
+                    id=tm_id,
                     mark=mark,
                     bbox=bbox,
                     last_seen_frame=frame_idx,
                 )
+                tm_id += 1
                 active_marks.append(tm)
 
             filtered_marks.append(tm)
@@ -456,10 +459,9 @@ def _get_area_max_counts(
             area_ids = mark_ids_in_area[area_name]
             area_ids.update(mark.id for mark in marks)
 
-            amax = area_max_counts[area_name]
-            if len(area_ids) > amax:
-                amax = len(area_ids)
-                area_max_counts[area_name] = amax
+            count = len(area_ids)
+            if count > area_max_counts[area_name]:
+                area_max_counts[area_name] = count
     return area_max_counts
 
 
