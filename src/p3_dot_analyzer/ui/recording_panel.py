@@ -69,10 +69,12 @@ def update_recording_frame_text(state: AppState) -> None:
     if state.recording.frame_count <= 0:
         dpg.set_value(state.recording.frame_text_tag, "No recording loaded")
         return
-    dpg.set_value(
-        state.recording.frame_text_tag,
-        f"Frame {state.recording.frame_index + 1}/{state.recording.frame_count}",
-    )
+    label = f"Frame {state.recording.frame_index + 1}/{state.recording.frame_count}"
+    if state.recording.reader is not None and state.render.current_frame is not None:
+        ts_start = state.recording.reader.ts_start.timestamp()
+        elapsed_seconds = max(0.0, state.render.current_frame.ts - ts_start)
+        label = f"{label} | t={elapsed_seconds:.2f}s"
+    dpg.set_value(state.recording.frame_text_tag, label)
 
 
 def render_recording_frame(
