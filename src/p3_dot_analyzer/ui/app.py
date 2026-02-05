@@ -237,6 +237,47 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
         else:
             update_status(app_state, "Batch analysis failed")
 
+    def _focused_input_item_type() -> str | None:
+        if not hasattr(dpg, "get_focused_item"):
+            return None
+        focused_item = dpg.get_focused_item()
+        if focused_item is None or not dpg.does_item_exist(focused_item):
+            return None
+        return dpg.get_item_type(focused_item)
+
+    def on_key_press(_sender: int, app_data: int) -> None:
+        if app_state.ui.active_tab != "analysis_tab":
+            return
+        if app_state.recording.reader is None or app_state.recording.frame_count <= 0:
+            return
+
+        focused_type = _focused_input_item_type()
+        if focused_type in (
+            "mvAppItemType::mvInputText",
+            "mvAppItemType::mvInputInt",
+            "mvAppItemType::mvInputFloat",
+        ):
+            return
+
+        if app_data == dpg.mvKey_Left:
+            delta = -1
+        elif app_data == dpg.mvKey_Right:
+            delta = 1
+        else:
+            return
+
+        next_index = max(
+            0,
+            min(
+                app_state.recording.frame_count - 1,
+                app_state.recording.frame_index + delta,
+            ),
+        )
+        if next_index == app_state.recording.frame_index:
+            return
+        render_recording_frame(app_state, next_index, on_image_loaded)
+        schedule_settings_save(app_state)
+
     if app_state.recording.selected_theme is None:
         with dpg.theme() as theme:
             with dpg.theme_component(dpg.mvSelectable):
@@ -408,6 +449,7 @@ def build_ui(app_state: AppState, camera: Camera) -> None:
     with dpg.handler_registry():
         dpg.add_mouse_click_handler(callback=handlers.on_mouse_click)
         dpg.add_mouse_move_handler(callback=handlers.on_mouse_move)
+        dpg.add_key_press_handler(callback=on_key_press)
         dpg.add_mouse_down_handler(
             button=dpg.mvMouseButton_Left, callback=handlers.on_mouse_down
         )
